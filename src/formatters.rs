@@ -153,5 +153,3 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> String {
 pub(crate) fn str_field<'a>(v: &'a serde_json::Value, key: &str) -> &'a str {
     v.get(key).and_then(|f| f.as_str()).unwrap_or("—")
 }
-
-

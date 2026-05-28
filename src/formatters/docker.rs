@@ -394,4 +394,3 @@ pub fn render_docker_host_status_markdown(data: &Value) -> String {
 
     format!("Host Status — {host}\n\n{docker_section}")
 }
-
