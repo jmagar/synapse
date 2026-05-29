@@ -2,34 +2,37 @@
 # =============================================================================
 # check-rust-module-size.sh — NO MONOLITHS gate for Rust production modules
 #
-# Ported from syslog-mcp (the fleet's best monolith deterrent) and tightened
-# for synapse2: small, focused modules only.
-#
-# Reports non-test Rust PRODUCTION files whose non-comment / non-blank / non-doc
-# line count exceeds the limit. Blank lines, line comments (// /// //!), and
-# block comments (/* ... */) are NOT counted — only real code lines.
-#
+# Ported from syslog-mcp and adapted for synapse2. Counts non-comment /
+# non-blank / non-doc lines (real code) per production .rs file. Blank lines,
+# line comments (// /// //!), and block comments (/* ... */) are NOT counted.
 # Test files are exempt: *_tests.rs, *test.rs, anything under tests/.
 #
-# Usage:
-#   scripts/check-rust-module-size.sh [--limit N] [--self-test] [PATH ...]
-#     (no PATH)  -> checks every tracked + untracked .rs file (CI / `just`)
-#     (PATH ...) -> checks only those files/dirs (lefthook staged files)
+# TWO-TIER policy (line count is a proxy; cohesion is the real goal):
+#   - SOFT (default 400): advisory. Prints a "check cohesion / consider
+#     splitting" notice but does NOT fail. Crossing 400 is a prompt to look at
+#     the module, not an automatic split mandate.
+#   - HARD (default 1000): a true monolith. FAILS (exit 1) — split it.
 #
-# Default limit: 400 real-code lines. docker_client.rs, SynapseService, and ssh.rs
-# have all been split into focused submodules, so the tree is green at 400.
-# Next ratchet target: 300 (current blockers: cli.rs ~326, actions.rs ~317,
-# xtask/main.rs ~320, xtask/patterns/checks.rs ~311 — split those, then drop to 300).
+# Usage:
+#   scripts/check-rust-module-size.sh [--soft N] [--hard N] [--self-test] [PATH ...]
+#     --limit N   alias for --soft N (back-compat / ad-hoc "what exceeds N" queries)
+#     (no PATH)   checks every tracked + untracked .rs file (CI / `just`)
+#     (PATH ...)  checks only those files/dirs (lefthook staged files)
 # =============================================================================
 set -euo pipefail
 
-limit=400
+soft=400
+hard=1000
 self_test=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --limit)
-      limit="${2:?--limit requires a value}"
+    --soft|--limit)
+      soft="${2:?$1 requires a value}"
+      shift 2
+      ;;
+    --hard)
+      hard="${2:?--hard requires a value}"
       shift 2
       ;;
     --self-test)
@@ -38,10 +41,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'USAGE'
-Usage: scripts/check-rust-module-size.sh [--limit N] [--self-test] [PATH ...]
+Usage: scripts/check-rust-module-size.sh [--soft N] [--hard N] [--self-test] [PATH ...]
 
-Reports non-test Rust production files with more than N non-comment/doc lines.
-Blank lines, line comments, doc comments, and block comments are ignored.
+Reports non-test Rust production files by real-code line count.
+  > soft (default 400): advisory notice, does NOT fail.
+  > hard (default 1000): monolith, fails with exit 1.
+Blank lines, line/doc comments, and block comments are ignored.
 When PATH values are provided, only those files/directories are checked.
 USAGE
       exit 0
@@ -150,20 +155,31 @@ tracked_files() {
   done | sort -u
 }
 
-status=0
+soft_hits=()
+hard_hits=()
 while IFS= read -r file; do
   is_prod_rust_file "$file" || continue
   count="$(count_file "$file")"
-  if (( count > limit )); then
-    printf '%s\t%s\n' "$count" "$file"
-    status=1
+  if (( count > hard )); then
+    hard_hits+=("$(printf '%s\t%s' "$count" "$file")")
+  elif (( count > soft )); then
+    soft_hits+=("$(printf '%s\t%s' "$count" "$file")")
   fi
 done < <(tracked_files "$@")
 
-if (( status != 0 )); then
+if (( ${#soft_hits[@]} > 0 )); then
   echo "" >&2
-  echo "NO MONOLITHS: Rust module(s) above ${limit} real-code lines (count<TAB>file above)." >&2
-  echo "Split into small focused modules (sibling foo.rs files, no mod.rs)." >&2
+  echo "NOTE: Rust module(s) above the ${soft}-line soft budget (advisory, not blocking):" >&2
+  printf '  %s\n' "${soft_hits[@]}" >&2
+  echo "Consider whether the module is still cohesive; split into focused siblings if not." >&2
 fi
 
-exit "$status"
+if (( ${#hard_hits[@]} > 0 )); then
+  echo "" >&2
+  echo "NO MONOLITHS: Rust module(s) above the ${hard}-line HARD limit (must split):" >&2
+  printf '  %s\n' "${hard_hits[@]}" >&2
+  echo "Split into small focused modules (sibling foo.rs files, no mod.rs)." >&2
+  exit 1
+fi
+
+exit 0

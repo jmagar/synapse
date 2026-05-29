@@ -131,7 +131,7 @@ ascii-fix:
 file-size-check:
     bash scripts/check-file-size.sh
 
-# NO MONOLITHS: fail if any Rust production module exceeds the real-code line budget (repo-wide)
+# NO MONOLITHS: advisory at 400 real-code lines, hard-fail at 1000 (repo-wide)
 module-size-check:
     bash scripts/check-rust-module-size.sh
 
