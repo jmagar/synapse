@@ -6,11 +6,17 @@ use serde_json::json;
 
 #[test]
 fn all_current_actions_are_non_destructive_and_read_only() {
-    // First parity slice ships only read-only actions; destructive ones arrive
-    // in B9/B10/B13. This guards against accidentally flipping a flag.
+    // B14 adds exec/emit/beam which are classified destructive (per synapse-mcp
+    // convention). All other actions remain read-only.
+    let destructive_actions: std::collections::HashSet<&str> =
+        ["exec", "emit", "beam"].iter().copied().collect();
     for spec in ACTION_SPECS {
-        assert!(!spec.destructive, "{} should not be destructive", spec.name);
-        assert!(is_read_only(spec), "{} should be read-only", spec.name);
+        if destructive_actions.contains(spec.name) {
+            assert!(spec.destructive, "{} should be destructive", spec.name);
+        } else {
+            assert!(!spec.destructive, "{} should not be destructive", spec.name);
+            assert!(is_read_only(spec), "{} should be read-only", spec.name);
+        }
     }
 }
 
@@ -109,7 +115,11 @@ fn parses_scout_actions_and_rejects_missing_fields() {
         SynapseAction::from_scout_args(&json!({"action":"nodes"})).unwrap(),
         SynapseAction::ScoutNodes
     );
+    // exec now requires `command` (path is optional).
     let error =
         SynapseAction::from_scout_args(&json!({"action":"exec","host":"local"})).unwrap_err();
-    assert!(error.to_string().contains("path"));
+    assert!(
+        error.to_string().contains("command"),
+        "missing command field error expected, got: {error}"
+    );
 }

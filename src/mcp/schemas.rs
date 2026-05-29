@@ -68,14 +68,55 @@ fn build_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "scout",
-            "description": "SSH/local host inspection for synapse2. First slice supports nodes, peek, and allowlisted exec.",
+            "description": "SSH/local host inspection for synapse2 (B14). Supports: nodes (list hosts), peek (file/dir view), find (glob search), ps (processes), df (disk usage), delta (file diff), exec (allowlisted command, destructive), emit (multi-host exec, destructive), beam (file transfer, destructive).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["help", "nodes", "peek", "exec"] },
-                    "host": { "type": "string" },
-                    "path": { "type": "string" },
-                    "command": { "type": "string" }
+                    "action": {
+                        "type": "string",
+                        "enum": ["help", "nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam"]
+                    },
+                    // shared
+                    "host": { "type": "string", "description": "Target host name (required for most actions)." },
+                    "path": { "type": "string", "description": "Absolute path (required for peek/find/exec path; optional for df; inline content alternative for delta)." },
+                    // peek
+                    "tree": { "type": "boolean", "description": "peek: emit a depth-limited directory tree." },
+                    "depth": { "type": "integer", "minimum": 1, "maximum": 20, "description": "peek/find: tree depth (default 3 for peek, 10 for find)." },
+                    // find
+                    "pattern": { "type": "string", "description": "find: glob pattern for -name (must not start with -)." },
+                    "limit": { "type": "integer", "minimum": 1, "description": "find/ps: max results (default 500 for find, 50 for ps)." },
+                    // ps
+                    "sort": { "type": "string", "enum": ["cpu", "mem", "pid", "time"], "description": "ps: sort field (default cpu)." },
+                    "grep": { "type": "string", "description": "ps: substring filter on process lines." },
+                    "user": { "type": "string", "description": "ps: prefix-match filter on user column." },
+                    // delta
+                    "source_host": { "type": "string", "description": "delta: source host name." },
+                    "source_path": { "type": "string", "description": "delta: source absolute path." },
+                    "target_host": { "type": "string", "description": "delta: target host name (mutually exclusive with content)." },
+                    "target_path": { "type": "string", "description": "delta: target absolute path." },
+                    "content": { "type": "string", "description": "delta: inline content to compare against source (≤1 MB; mutually exclusive with target_host/target_path)." },
+                    // exec/emit
+                    "command": { "type": "string", "description": "exec/emit: command name from allowlist (cat/head/tail/grep/rg/find/ls/tree/wc/sort/uniq/diff/stat/file/du/df/pwd/hostname/uptime/whoami). git is NOT allowlisted." },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "exec/emit: positional arguments (execvp-style, no shell)." },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "description": "exec/emit: per-host timeout in seconds (default 30)." },
+                    // emit
+                    "targets": {
+                        "type": "array",
+                        "description": "emit: list of {host, path} targets.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "host": { "type": "string" },
+                                "path": { "type": "string" }
+                            },
+                            "required": ["host"]
+                        }
+                    },
+                    // beam
+                    "source_host": { "type": "string", "description": "beam: source host name." },
+                    "source_path": { "type": "string", "description": "beam: source absolute path." },
+                    "dest_host": { "type": "string", "description": "beam: destination host name." },
+                    "dest_path": { "type": "string", "description": "beam: destination absolute path." }
                 },
                 "required": ["action"],
                 "additionalProperties": false

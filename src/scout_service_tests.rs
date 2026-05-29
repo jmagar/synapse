@@ -29,10 +29,19 @@ async fn test_scout_help_shape() {
     let result = scout.help().await.expect("help should succeed");
 
     assert_eq!(result["tool"], "scout");
-    assert_eq!(
-        result["actions"],
-        serde_json::json!(["nodes", "peek", "exec", "help"])
-    );
+    // All 9 B14 actions + help must be present.
+    let actions = result["actions"]
+        .as_array()
+        .expect("actions should be an array");
+    let names: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
+    for expected in &[
+        "nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam", "help",
+    ] {
+        assert!(
+            names.contains(expected),
+            "missing action `{expected}` from help"
+        );
+    }
 }
 
 #[tokio::test]
@@ -53,8 +62,24 @@ async fn test_scout_exec_resolves_through_injected_repo() {
     // Unknown host comes from the injected repo (only "stub-node" exists), so
     // resolving "missing" must fail with the repo-driven error.
     let error = scout
-        .exec("missing", "/tmp", "echo hi")
+        .exec("missing", None, "echo", &[], &ApproveConfirmer)
         .await
         .expect_err("unknown host should be rejected via injected repo");
     assert!(error.to_string().contains("unknown host"));
+}
+
+// ─── ApproveConfirmer ─────────────────────────────────────────────────────────
+
+/// Test-only confirmer that always approves.
+struct ApproveConfirmer;
+
+#[async_trait::async_trait]
+impl crate::elicitation_gate::Confirmer for ApproveConfirmer {
+    async fn require(
+        &self,
+        _op: &str,
+        _details: &str,
+    ) -> Result<(), crate::elicitation_gate::ConfirmationDenied> {
+        Ok(())
+    }
 }

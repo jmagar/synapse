@@ -15,6 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **scout simple actions (B14)** — 9 scout subactions reachable from both MCP (`scout` tool) and CLI (`synapse2 scout …`):
+  - `nodes` — list all configured hosts (previously MVP, now fully wired to `ScoutService`).
+  - `peek` — read a file or directory listing on a host. Adds `tree` (bool) and `depth` (1–10) params. Symlink check via `validate_safe_path` + remote via SSH `stat`+`cat`/`ls`.
+  - `find` — `find <path> -maxdepth <N> -name <pattern> -type f` on a host. Pattern validated to reject leading `-` (option injection guard).
+  - `ps` — `ps aux --sort -<field>` with sort/grep/user/limit filters. Sort field validated against allowlist `[cpu, mem, pid, time]`.
+  - `df` — `df -h [path]` disk usage. Path validated via `validate_safe_path`.
+  - `delta` — compare a remote file against either another `{host,path}` or inline `content` (≤1 MB). Produces unified diff header with labelled lines.
+  - `exec` — run an allowlisted command on a host. **DESTRUCTIVE** (gated via B5 Confirmer). Command validated by `validate_command`+`EXEC_ALLOWLIST` BEFORE any IO. `git` is explicitly NOT in the allowlist (B0 security review). `path` is the optional working directory for local hosts only; SSH exec is execvp-style (no shell, no `cd`). HARD INVARIANT: never wraps commands in `sh -c`.
+  - `emit` — run an allowlisted command across multiple `{host, path}` targets with per-host timeout. **DESTRUCTIVE** — single Confirmer gate fires before the multi-host loop. Per-host validation runs individually. Returns `all_ok`/`partial_success`/`all_failed` status.
+  - `beam` — transfer a file between two `{host,path}` endpoints via `scp` subprocess (not a shell; args are typed). **DESTRUCTIVE** — gated via B5. Both paths validated by `validate_safe_path`.
+- `src/scout_service/fs.rs` — `peek`, `find`, `delta` implementations.
+- `src/scout_service/proc.rs` — `ps`, `df` implementations.
+- `src/scout_service/exec.rs` — `exec`, `emit`, `beam` implementations with B5 gating.
+- `src/scout_service/fs_tests.rs`, `proc_tests.rs`, `exec_tests.rs` — unit tests covering validator rejection, `git`/`rm` denylist, confirmer decline, partial-success fanout.
+- `ScoutService` extended with SSH executor (`Arc<dyn SshExecutor>`) + `with_ssh_executor` injector.
+- `SynapseAction` extended with `ScoutPeek` (now with `tree`/`depth`), `ScoutFind`, `ScoutPs`, `ScoutDf`, `ScoutDelta`, `ScoutExec`, `ScoutEmit`, `ScoutBeam` variants.
+- `ACTION_SPECS` updated: `find`, `ps`, `df`, `delta` (read, `READ_SCOPE`); `exec`, `emit`, `beam` (destructive, `WRITE_SCOPE`).
+- `src/mcp/schemas.rs` — `scout` tool schema expanded to all 9 actions with full parameter documentation.
+
+### Security
+
+- B14 security note: `git` removed from exec allowlist (B0 fix: `git -c core.editor=...` RCE vector). Tests assert `git` is rejected.
+- `validate_safe_path` enforces absolute paths, no `..`, no unsafe chars, no local symlinks for all peek/find/delta/beam paths. Remote path validation is syntactic-only (symlink check uses local `symlink_metadata` — no-op for paths not on the local fs).
+- SSH exec is always execvp-style (`SshExecutor::exec(program, args[])`) — the `sh -c` shell injection invariant is locked and tested.
+- `emit` multi-host exec validates the command against the global allowlist before confirmation, then again per-host (host-specific allowlist may differ).
+
 - **flux compose operations (B13)** — 10 compose subactions reachable from both MCP (`flux` tool `action=compose`) and CLI (`synapse2 flux compose …`):
   - `list` — run `docker compose ls --format json` on a host; returns discovered projects. Also invalidates the B12 cache via `refresh`.
   - `refresh` — invalidate the B12 compose discovery cache for a host, forcing a re-scan on the next `list`.

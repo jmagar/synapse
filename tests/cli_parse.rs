@@ -119,31 +119,55 @@ fn scout_commands_parse() {
         parse_args_from(["scout", "nodes"]).unwrap(),
         Some(Command::ScoutNodes)
     );
+    // peek with defaults
     assert_eq!(
         parse_args_from(["scout", "peek", "--host", "local", "--path", "/tmp"]).unwrap(),
         Some(Command::ScoutPeek {
             host: "local".into(),
             path: "/tmp".into(),
+            tree: false,
+            depth: 3,
         })
     );
-    assert_eq!(
-        parse_args_from([
-            "scout",
-            "exec",
-            "--host",
-            "local",
-            "--path",
-            "/tmp",
-            "--command",
-            "ls"
-        ])
-        .unwrap(),
-        Some(Command::ScoutExec {
-            host: "local".into(),
-            path: "/tmp".into(),
-            command: "ls".into(),
-        })
-    );
+    // exec with new boxed args shape
+    let cmd = parse_args_from([
+        "scout",
+        "exec",
+        "--host",
+        "local",
+        "--path",
+        "/tmp",
+        "--command",
+        "ls",
+    ])
+    .unwrap();
+    match cmd {
+        Some(Command::ScoutExec(a)) => {
+            assert_eq!(a.host, "local");
+            assert_eq!(a.path.as_deref(), Some("/tmp"));
+            assert_eq!(a.command, "ls");
+        }
+        other => panic!("expected ScoutExec, got {other:?}"),
+    }
+    // find
+    let cmd = parse_args_from([
+        "scout",
+        "find",
+        "--host",
+        "local",
+        "--path",
+        "/etc",
+        "--pattern",
+        "*.conf",
+    ])
+    .unwrap();
+    match cmd {
+        Some(Command::ScoutFind(a)) => {
+            assert_eq!(a.host, "local");
+            assert_eq!(a.pattern, "*.conf");
+        }
+        other => panic!("expected ScoutFind, got {other:?}"),
+    }
 }
 
 #[test]
