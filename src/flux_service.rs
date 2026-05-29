@@ -18,13 +18,19 @@ use crate::elicitation_gate::Confirmer;
 use crate::fanout::{fanout, FanoutOutcome};
 use crate::host_config::HostRepository;
 use crate::scout;
+use crate::ssh::SshPool;
 use crate::synapse::HostConfig;
 
 pub mod container_read;
 pub mod docker;
+pub mod host;
 
 use container_read::{ListFilters, LogOptions};
 use docker::{BuildArgs, PruneTarget};
+use host::{
+    info_on_host, is_local_host, mounts_on_host, network_on_host, resources_on_host,
+    services_on_host, uptime_on_host, CheckResult, CheckStatus, LocalExec, RemoteExec,
+};
 
 #[cfg(test)]
 #[path = "flux_service_tests.rs"]
@@ -42,15 +48,22 @@ pub struct FluxService {
     /// Per-host bollard Docker client cache (B2). One client per `HostConfig`,
     /// reused; remote hosts connect via B1's SSH-forwarded unix socket.
     pub(crate) docker_clients: Arc<DockerClientCache>,
+    /// SSH session pool for host shell commands (B11). Shared across clones so
+    /// ControlMaster connections are reused.
+    pub(crate) ssh_pool: Arc<SshPool>,
 }
 
 impl FluxService {
     /// Construct with the supplied host repository and default discovery / client caches.
     pub fn new(host_repo: Arc<dyn HostRepository>) -> Self {
+        let ssh_pool = Arc::new(SshPool::new());
         Self {
             host_repo,
-            compose: Arc::new(ComposeDiscovery::new(Arc::new(crate::ssh::SshPool::new()))),
+            compose: Arc::new(ComposeDiscovery::new(
+                Arc::clone(&ssh_pool) as Arc<dyn crate::ssh::SshExecutor>
+            )),
             docker_clients: Arc::new(DockerClientCache::new()),
+            ssh_pool,
         }
     }
 
@@ -63,7 +76,10 @@ impl FluxService {
                     "pull", "build", "rmi", "prune"
                 ],
                 "container": ["list", "inspect", "logs", "stats", "top", "search"],
-                "host": ["status"],
+                "host": [
+                    "status", "info", "uptime", "resources",
+                    "services", "network", "mounts", "ports", "doctor"
+                ],
                 "help": []
             },
             "destructive": ["docker build", "docker rmi", "docker prune"],
@@ -406,11 +422,363 @@ impl FluxService {
         ))
     }
 
+    // ── host ops (B11) ──────────────────────────────────────────────────
+
+    /// Build a `HostExec` impl for the given host: `LocalExec` for local
+    /// protocol / localhost, `RemoteExec` (SSH pool) for everything else.
+    /// The returned value holds a reference into `&self.ssh_pool`, hence the
+    /// lifetime annotation tying it to `&self`.
+    fn exec_for_host<'a>(&'a self, host: &'a HostConfig) -> Box<dyn host::HostExec + 'a> {
+        if is_local_host(host) {
+            Box::new(LocalExec)
+        } else {
+            Box::new(RemoteExec {
+                executor: self.ssh_pool.as_ref(),
+                host,
+            })
+        }
+    }
+
+    /// Quick connectivity probe: docker info + container count (+ failed services
+    /// when systemd is available) per target host(s). Fans out when `host` is None.
     pub async fn host_status(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let ssh = Arc::clone(&self.ssh_pool);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = clients.clone();
+            let ssh = Arc::clone(&ssh);
+            let is_local = is_local_host(&h);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                let info_val = docker::info_on_host(client.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let containers =
+                    container_read::list_on_host(client.as_ref(), &h.name, &ListFilters::default())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                let running = containers
+                    .iter()
+                    .filter(|c| c.get("state").and_then(Value::as_str) == Some("running"))
+                    .count();
+                // docker_info returns { "host": "...", "info": { "ServerVersion": "...", ... } }
+                let docker_version = info_val
+                    .get("info")
+                    .and_then(|i| i.get("ServerVersion"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+
+                // Best-effort: failed service count via systemctl
+                let failed_service_count: usize = {
+                    let exec: Box<dyn host::HostExec> = if is_local {
+                        Box::new(LocalExec)
+                    } else {
+                        Box::new(RemoteExec {
+                            executor: ssh.as_ref(),
+                            host: &h,
+                        })
+                    };
+                    match exec.run("systemctl", &["--failed", "--no-legend"]).await {
+                        Ok(out) => out
+                            .stdout
+                            .lines()
+                            .filter(|l| {
+                                let t = l.trim();
+                                !t.is_empty()
+                                    && t.split_whitespace().any(|tok| tok.ends_with(".service"))
+                            })
+                            .count(),
+                        Err(_) => 0,
+                    }
+                };
+
+                Ok(json!({
+                    "name": h.name,
+                    "connected": true,
+                    "containerCount": containers.len(),
+                    "runningCount": running,
+                    "failedServiceCount": failed_service_count,
+                    "dockerVersion": docker_version,
+                }))
+            }
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "status"))
+    }
+
+    /// `uname -a` output for target host(s). Fans out when `host` is None.
+    pub async fn host_info(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let ssh = Arc::clone(&self.ssh_pool);
+        let outcome = fanout(&hosts, move |h| {
+            let ssh = Arc::clone(&ssh);
+            async move {
+                let exec: Box<dyn host::HostExec> = if is_local_host(&h) {
+                    Box::new(LocalExec)
+                } else {
+                    Box::new(RemoteExec {
+                        executor: ssh.as_ref(),
+                        host: &h,
+                    })
+                };
+                info_on_host(exec.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "info"))
+    }
+
+    /// `uptime` output for target host(s). Fans out when `host` is None.
+    pub async fn host_uptime(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let ssh = Arc::clone(&self.ssh_pool);
+        let outcome = fanout(&hosts, move |h| {
+            let ssh = Arc::clone(&ssh);
+            async move {
+                let exec: Box<dyn host::HostExec> = if is_local_host(&h) {
+                    Box::new(LocalExec)
+                } else {
+                    Box::new(RemoteExec {
+                        executor: ssh.as_ref(),
+                        host: &h,
+                    })
+                };
+                uptime_on_host(exec.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "uptime"))
+    }
+
+    /// CPU/memory/disk metrics for target host(s). Fans out when `host` is None.
+    pub async fn host_resources(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let ssh = Arc::clone(&self.ssh_pool);
+        let outcome = fanout(&hosts, move |h| {
+            let ssh = Arc::clone(&ssh);
+            async move {
+                let exec: Box<dyn host::HostExec> = if is_local_host(&h) {
+                    Box::new(LocalExec)
+                } else {
+                    Box::new(RemoteExec {
+                        executor: ssh.as_ref(),
+                        host: &h,
+                    })
+                };
+                resources_on_host(exec.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "resources"))
+    }
+
+    /// Systemd service list for a single host (single-host only — service filter
+    /// context doesn't fan out meaningfully).
+    pub async fn host_services(
+        &self,
+        host: &str,
+        state: Option<&str>,
+        service: Option<&str>,
+    ) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        let exec = self.exec_for_host(&h);
+        services_on_host(exec.as_ref(), &h.name, state, service).await
+    }
+
+    /// Network interface info for target host(s). Fans out when `host` is None.
+    pub async fn host_network(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let ssh = Arc::clone(&self.ssh_pool);
+        let outcome = fanout(&hosts, move |h| {
+            let ssh = Arc::clone(&ssh);
+            async move {
+                let exec: Box<dyn host::HostExec> = if is_local_host(&h) {
+                    Box::new(LocalExec)
+                } else {
+                    Box::new(RemoteExec {
+                        executor: ssh.as_ref(),
+                        host: &h,
+                    })
+                };
+                network_on_host(exec.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "network"))
+    }
+
+    /// Mounted filesystem info via `df -h` for a single host.
+    pub async fn host_mounts(&self, host: &str) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        let exec = self.exec_for_host(&h);
+        mounts_on_host(exec.as_ref(), &h.name).await
+    }
+
+    /// Container port mappings for a single host, with optional protocol filter.
+    pub async fn host_ports(
+        &self,
+        host: &str,
+        protocol: Option<&str>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        let client = self.docker_clients.client_for(&h).await?;
+        let containers =
+            container_read::list_on_host(client.as_ref(), &h.name, &ListFilters::default()).await?;
+
+        let mut ports: Vec<Value> = containers
+            .iter()
+            .flat_map(|c| {
+                let container_name = c.get("name").and_then(Value::as_str).unwrap_or("");
+                let image = c.get("image").and_then(Value::as_str).unwrap_or("");
+                let state = c.get("state").and_then(Value::as_str).unwrap_or("");
+                c.get("ports")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|p| {
+                                json!({
+                                    "container": container_name,
+                                    "image": image,
+                                    "state": state,
+                                    "hostPort": p.get("host_port"),
+                                    "containerPort": p.get("container_port"),
+                                    "protocol": p.get("protocol"),
+                                    "hostIp": p.get("host_ip"),
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        if let Some(proto) = protocol {
+            ports.retain(|p| {
+                p.get("protocol")
+                    .and_then(Value::as_str)
+                    .map(|pr| pr.eq_ignore_ascii_case(proto))
+                    .unwrap_or(false)
+            });
+        }
+
+        let total = ports.len();
+        let off = offset.unwrap_or(0);
+        let lim = limit.unwrap_or(usize::MAX);
+        let paginated: Vec<Value> = ports.into_iter().skip(off).take(lim).collect();
+        let has_more = off + lim < total;
+
         Ok(json!({
-            "host": host.unwrap_or("local"),
-            "docker": self.docker_info(host).await?,
+            "host": h.name,
+            "ports": paginated,
+            "total": total,
+            "offset": off,
+            "hasMore": has_more,
         }))
+    }
+
+    /// Run health checks for a single host, aggregating results from all
+    /// specified `checks`. `docker` and `containers` use bollard; the rest use
+    /// the exec seam. Fans out only for `checks` that need SSH.
+    pub async fn host_doctor(&self, host: &str, checks: Vec<String>) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        let client = self.docker_clients.client_for(&h).await;
+        let exec = self.exec_for_host(&h);
+
+        // Partition: bollard checks first, exec-based checks deferred.
+        let mut pre_results: Vec<CheckResult> = Vec::new();
+        let mut exec_checks: Vec<String> = Vec::new();
+
+        for check in &checks {
+            match check.as_str() {
+                "docker" => {
+                    let result = match &client {
+                        Ok(c) => match docker::info_on_host(c.as_ref(), &h.name).await {
+                            Ok(info_val) => {
+                                let ver = info_val
+                                    .get("info")
+                                    .and_then(|i| i.get("ServerVersion"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("?");
+                                let api = info_val
+                                    .get("info")
+                                    .and_then(|i| i.get("ApiVersion"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("?");
+                                CheckResult {
+                                    check: "docker".into(),
+                                    status: CheckStatus::Pass,
+                                    detail: format!("Docker {ver} — API {api}"),
+                                }
+                            }
+                            Err(e) => CheckResult {
+                                check: "docker".into(),
+                                status: CheckStatus::Fail,
+                                detail: e.to_string(),
+                            },
+                        },
+                        Err(e) => CheckResult {
+                            check: "docker".into(),
+                            status: CheckStatus::Fail,
+                            detail: e.to_string(),
+                        },
+                    };
+                    pre_results.push(result);
+                }
+                "containers" => {
+                    let result = match &client {
+                        Ok(c) => {
+                            match container_read::list_on_host(
+                                c.as_ref(),
+                                &h.name,
+                                &ListFilters::default(),
+                            )
+                            .await
+                            {
+                                Ok(ctrs) => {
+                                    let running = ctrs
+                                        .iter()
+                                        .filter(|c| {
+                                            c.get("state").and_then(Value::as_str)
+                                                == Some("running")
+                                        })
+                                        .count();
+                                    CheckResult {
+                                        check: "containers".into(),
+                                        status: CheckStatus::Pass,
+                                        detail: format!("{running} running / {} total", ctrs.len()),
+                                    }
+                                }
+                                Err(e) => CheckResult {
+                                    check: "containers".into(),
+                                    status: CheckStatus::Fail,
+                                    detail: e.to_string(),
+                                },
+                            }
+                        }
+                        Err(e) => CheckResult {
+                            check: "containers".into(),
+                            status: CheckStatus::Fail,
+                            detail: e.to_string(),
+                        },
+                    };
+                    pre_results.push(result);
+                }
+                _ => exec_checks.push(check.clone()),
+            }
+        }
+
+        Ok(host::doctor_on_host(exec.as_ref(), &h.name, &exec_checks, pre_results).await)
     }
 
     /// Discover compose projects on `host_name`, merging `docker compose ls`

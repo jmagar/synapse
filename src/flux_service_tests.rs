@@ -26,7 +26,20 @@ async fn test_flux_help_shape() {
         result["actions"]["container"],
         serde_json::json!(["list", "inspect", "logs", "stats", "top", "search"])
     );
-    assert_eq!(result["actions"]["host"], serde_json::json!(["status"]));
+    assert_eq!(
+        result["actions"]["host"],
+        serde_json::json!([
+            "status",
+            "info",
+            "uptime",
+            "resources",
+            "services",
+            "network",
+            "mounts",
+            "ports",
+            "doctor"
+        ])
+    );
 }
 
 #[test]

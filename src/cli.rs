@@ -14,7 +14,7 @@
 //! ```
 
 use crate::{
-    actions::{rest_help, ContainerArgs, DockerArgs},
+    actions::{rest_help, ContainerArgs, DockerArgs, HostArgs},
     app::SynapseService,
     config::SynapseConfig,
     synapse2::SynapseClient,
@@ -47,6 +47,14 @@ pub const USAGE: &str = "Usage:
   synapse2 flux container search --query Q [--host H]
     (all flux container subactions also accept [--response-format markdown|json])
   synapse2 flux host status [--host HOST]
+  synapse2 flux host info [--host HOST]
+  synapse2 flux host uptime [--host HOST]
+  synapse2 flux host resources [--host HOST]
+  synapse2 flux host services --host HOST [--state STATE] [--service NAME]
+  synapse2 flux host network [--host HOST]
+  synapse2 flux host mounts --host HOST
+  synapse2 flux host ports --host HOST [--protocol tcp|udp] [--limit N] [--offset N]
+  synapse2 flux host doctor --host HOST [--checks c1,c2,...]
   synapse2 scout nodes
   synapse2 scout peek --host HOST --path PATH
   synapse2 scout exec --host HOST --path PATH --command CMD
@@ -81,10 +89,7 @@ pub enum Command {
     /// Container read-only subactions. Params are boxed in [`ContainerArgs`]
     /// (shared with [`crate::actions::SynapseAction`]) so the enum stays small.
     FluxContainer(Box<ContainerArgs>),
-    FluxHost {
-        subaction: String,
-        host: Option<String>,
-    },
+    FluxHost(Box<crate::actions::HostArgs>),
     ScoutNodes,
     ScoutPeek {
         host: String,
@@ -350,10 +355,51 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
                 other => return Err(anyhow!("unknown flux container subaction `{other}`")),
             }
         }
-        Command::FluxHost { subaction, host } => match subaction.as_str() {
-            "status" => service.flux().host_status(host.as_deref()).await?,
-            other => return Err(anyhow!("unknown flux host subaction `{other}`")),
-        },
+        Command::FluxHost(args) => {
+            use crate::flux_service::host::DEFAULT_DOCTOR_CHECKS;
+            let flux = service.flux();
+            let host = args.host.as_deref();
+            match args.subaction.as_str() {
+                "status" => flux.host_status(host).await?,
+                "info" => flux.host_info(host).await?,
+                "uptime" => flux.host_uptime(host).await?,
+                "resources" => flux.host_resources(host).await?,
+                "services" => {
+                    let h = host.ok_or_else(|| anyhow!("host services requires --host"))?;
+                    flux.host_services(h, args.state.as_deref(), args.service.as_deref())
+                        .await?
+                }
+                "network" => flux.host_network(host).await?,
+                "mounts" => {
+                    let h = host.ok_or_else(|| anyhow!("host mounts requires --host"))?;
+                    flux.host_mounts(h).await?
+                }
+                "ports" => {
+                    let h = host.ok_or_else(|| anyhow!("host ports requires --host"))?;
+                    flux.host_ports(
+                        h,
+                        args.protocol.as_deref(),
+                        args.limit.map(|v| v as usize),
+                        args.offset.map(|v| v as usize),
+                    )
+                    .await?
+                }
+                "doctor" => {
+                    let h = host.ok_or_else(|| anyhow!("host doctor requires --host"))?;
+                    let checks: Vec<String> = match &args.checks {
+                        Some(s) if !s.is_empty() => {
+                            s.split(',').map(|c| c.trim().to_owned()).collect()
+                        }
+                        _ => DEFAULT_DOCTOR_CHECKS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect(),
+                    };
+                    flux.host_doctor(h, checks).await?
+                }
+                other => return Err(anyhow!("unknown flux host subaction `{other}`")),
+            }
+        }
         Command::ScoutNodes => service.scout().nodes().await?,
         Command::ScoutPeek { host, path } => service.scout().peek(host, path).await?,
         Command::ScoutExec {
@@ -443,10 +489,24 @@ fn parse_flux(args: &[String]) -> Result<Command> {
                 query: parse_optional_named_value(&value_args, "--query")?,
             })))
         }
-        [group, subaction, rest @ ..] if group == "host" => Ok(Command::FluxHost {
-            subaction: subaction.clone(),
-            host: parse_optional_value_flag(rest, "flux host", "--host")?,
-        }),
+        [group, subaction, rest @ ..] if group == "host" => {
+            Ok(Command::FluxHost(Box::new(HostArgs {
+                subaction: subaction.clone(),
+                host: parse_optional_named_value(rest, "--host")?,
+                state: parse_optional_named_value(rest, "--state")?,
+                service: parse_optional_named_value(rest, "--service")?,
+                protocol: parse_optional_named_value(rest, "--protocol")?,
+                limit: parse_optional_named_value(rest, "--limit")?
+                    .map(|v| v.parse::<u32>())
+                    .transpose()
+                    .map_err(|_| anyhow!("--limit must be an integer"))?,
+                offset: parse_optional_named_value(rest, "--offset")?
+                    .map(|v| v.parse::<u32>())
+                    .transpose()
+                    .map_err(|_| anyhow!("--offset must be an integer"))?,
+                checks: parse_optional_named_value(rest, "--checks")?,
+            })))
+        }
         _ => Err(anyhow!("unknown flux command")),
     }
 }
@@ -509,32 +569,6 @@ fn parse_bool_flag(args: &[String], command: &str, flag: &str) -> Result<bool> {
         }
     }
     Ok(found)
-}
-
-fn parse_optional_value_flag(args: &[String], command: &str, flag: &str) -> Result<Option<String>> {
-    match args {
-        [] => Ok(None),
-        [found_flag, value] if found_flag == flag => {
-            if value.starts_with("--") {
-                Err(anyhow!("{command} requires a value after {flag}"))
-            } else {
-                Ok(Some(value.clone()))
-            }
-        }
-        [found_flag] if found_flag == flag => {
-            Err(anyhow!("{command} requires a value after {flag}"))
-        }
-        [found_flag, value, rest @ ..] if found_flag == flag => {
-            if value.starts_with("--") {
-                Err(anyhow!("{command} requires a value after {flag}"))
-            } else if rest.iter().any(|arg| arg == flag) {
-                Err(anyhow!("{command} received duplicate {flag}"))
-            } else {
-                Err(anyhow!("{command} does not accept argument `{}`", rest[0]))
-            }
-        }
-        [unexpected, ..] => Err(anyhow!("{command} does not accept argument `{unexpected}`")),
-    }
 }
 
 fn parse_watch_flags(args: &[String]) -> Result<(Option<String>, Option<String>)> {

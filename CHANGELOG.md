@@ -15,6 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **flux host full parity (B11)** — 9 host subactions reachable from both MCP (`flux` tool `action=host`) and CLI (`synapse2 flux host …`):
+  - `status` — Docker connectivity probe + container count + failed systemd service count (best-effort), fans out across all hosts when `host` unspecified.
+  - `info` — `uname -a` output, fans out when `host` unspecified.
+  - `uptime` — `uptime` output, fans out when `host` unspecified.
+  - `resources` — CPU (load avg from `/proc/loadavg`), memory (`/proc/meminfo`), disk (`df -h`), fans out when `host` unspecified.
+  - `services` — `systemctl list-units --type=service --no-pager` with optional `state` and `service` name filters; single-host.
+  - `network` — `ip addr show` (falls back to `cat /proc/net/dev`); fans out when `host` unspecified.
+  - `mounts` — `df -h` output; single-host.
+  - `ports` — container port mappings via bollard with optional `protocol` filter and `limit`/`offset` pagination; single-host.
+  - `doctor` — aggregated health checks: `docker`, `containers` (bollard), `resources`, `network`, `services`, `logs` (journald), `processes`; accepts `checks` list to run a subset; single-host.
+  - Local hosts (`HostProtocol::Local` / `localhost`) use `std::process::Command`; remote hosts use the SSH pool (execvp-style, no shell).
+  - Shell commands are developer-hardcoded — `validate_command` / `EXEC_ALLOWLIST` guard only applies to user-supplied `scout exec` input.
+- `src/flux_service/host.rs` — pure per-host functions + `HostExec` seam (`LocalExec` / `RemoteExec`), `CheckResult`/`CheckStatus` types, `strip_systemctl_footer`, `parse_meminfo`, `parse_loadavg`.
+- `src/flux_service/host_tests.rs` — 22 unit tests with a `MockExec` returning canned `CommandOutput`; no live SSH server required.
+- `HostArgs` params struct in `actions.rs` (mirrors `ContainerArgs`/`DockerArgs` pattern); `dispatch_flux_host` dispatcher.
+- `ssh_pool` field on `FluxService` — shared `Arc<SshPool>` for host shell commands.
+
 - **flux docker full parity (B10)** — `info`, `df`, `images` (with `dangling_only`), `networks`, `volumes`, `pull`, `build`, `rmi`, `prune` (target: containers/images/volumes/networks/buildcache/all), via bollard, reachable from MCP (`flux` tool) and CLI. Read-only ops fan out across hosts; `pull`/`build`/`rmi`/`prune` are single-host. `build`/`rmi`/`prune` are gated through the B5 destructive-op elicitation gate (decline → hard error unless `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`). `build` shells out to `docker build` (bollard's build needs a streamed tar); all other ops use bollard. New `src/flux_service/docker.rs` with build-context/Dockerfile validation and `PruneTarget` parsing.
 
 - **flux container read-only ops (B8)** — replaced the local-`docker`-CLI stubs for `list`/`inspect`/`logs` with bollard-backed implementations and added `stats`, `top`, and `search`, all reachable from both MCP (`flux` tool) and CLI (`synapse2 flux container …`):

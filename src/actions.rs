@@ -214,15 +214,29 @@ pub struct DockerArgs {
     pub prune_target: Option<String>,
 }
 
+/// Parsed parameters for `flux host` subactions (B11).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HostArgs {
+    pub subaction: String,
+    /// Target host name (None = fan out to all hosts).
+    pub host: Option<String>,
+    // services params
+    pub state: Option<String>,
+    pub service: Option<String>,
+    // ports params
+    pub protocol: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    // doctor params
+    pub checks: Option<String>, // comma-separated check names
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
     FluxHelp,
     FluxDocker(Box<DockerArgs>),
     FluxContainer(Box<ContainerArgs>),
-    FluxHost {
-        subaction: String,
-        host: Option<String>,
-    },
+    FluxHost(Box<HostArgs>),
     ScoutHelp,
     ScoutNodes,
     ScoutPeek {
@@ -242,7 +256,7 @@ impl SynapseAction {
             Self::FluxHelp | Self::ScoutHelp => "help",
             Self::FluxDocker(_) => "docker",
             Self::FluxContainer(_) => "container",
-            Self::FluxHost { .. } => "host",
+            Self::FluxHost(_) => "host",
             Self::ScoutNodes => "nodes",
             Self::ScoutPeek { .. } => "peek",
             Self::ScoutExec { .. } => "exec",
@@ -293,10 +307,16 @@ impl SynapseAction {
                     query: optional_string_param(args, "query")?,
                 })))
             }
-            "host" => Ok(Self::FluxHost {
+            "host" => Ok(Self::FluxHost(Box::new(HostArgs {
                 subaction: required_string_param(args, "subaction")?,
                 host: optional_string_param(args, "host")?,
-            }),
+                state: optional_string_param(args, "state")?,
+                service: optional_string_param(args, "service")?,
+                protocol: optional_string_param(args, "protocol")?,
+                limit: optional_u32_param(args, "limit")?,
+                offset: optional_u32_param(args, "offset")?,
+                checks: optional_string_param(args, "checks")?,
+            }))),
             other => Err(ValidationError::UnknownAction {
                 action: other.to_owned(),
             }
@@ -338,13 +358,7 @@ pub async fn execute_service_action(
         SynapseAction::FluxHelp => service.flux().help().await,
         SynapseAction::FluxDocker(args) => dispatch_flux_docker(service, args, confirmer).await,
         SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
-        SynapseAction::FluxHost { subaction, host } => match subaction.as_str() {
-            "status" => service.flux().host_status(host.as_deref()).await,
-            other => Err(ValidationError::UnknownAction {
-                action: format!("host:{other}"),
-            }
-            .into()),
-        },
+        SynapseAction::FluxHost(args) => dispatch_flux_host(service, args).await,
         SynapseAction::ScoutHelp => service.scout().help().await,
         SynapseAction::ScoutNodes => service.scout().nodes().await,
         SynapseAction::ScoutPeek { host, path } => service.scout().peek(host, path).await,
@@ -479,6 +493,53 @@ async fn dispatch_flux_container(service: &SynapseService, args: &ContainerArgs)
         }
         other => Err(ValidationError::UnknownAction {
             action: format!("container:{other}"),
+        }
+        .into()),
+    }
+}
+
+/// Dispatch a `flux host` subaction to the [`FluxService`].
+///
+/// Thin: extracts the parsed [`HostArgs`] and calls the matching service method.
+/// All shell execution / fanout logic lives in `FluxService` / the `host` submodule.
+async fn dispatch_flux_host(service: &SynapseService, args: &HostArgs) -> Result<Value> {
+    let flux = service.flux();
+    let host = args.host.as_deref();
+    match args.subaction.as_str() {
+        "status" => flux.host_status(host).await,
+        "info" => flux.host_info(host).await,
+        "uptime" => flux.host_uptime(host).await,
+        "resources" => flux.host_resources(host).await,
+        "services" => {
+            let h = require_field(&args.host, "host")?;
+            flux.host_services(h, args.state.as_deref(), args.service.as_deref())
+                .await
+        }
+        "network" => flux.host_network(host).await,
+        "mounts" => {
+            let h = require_field(&args.host, "host")?;
+            flux.host_mounts(h).await
+        }
+        "ports" => {
+            let h = require_field(&args.host, "host")?;
+            let limit = args.limit.map(|v| v as usize);
+            let offset = args.offset.map(|v| v as usize);
+            flux.host_ports(h, args.protocol.as_deref(), limit, offset)
+                .await
+        }
+        "doctor" => {
+            let h = require_field(&args.host, "host")?;
+            let checks: Vec<String> = match &args.checks {
+                Some(s) if !s.is_empty() => s.split(',').map(|c| c.trim().to_owned()).collect(),
+                _ => crate::flux_service::host::DEFAULT_DOCTOR_CHECKS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            };
+            flux.host_doctor(h, checks).await
+        }
+        other => Err(ValidationError::UnknownAction {
+            action: format!("host:{other}"),
         }
         .into()),
     }
