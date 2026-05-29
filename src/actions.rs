@@ -1,7 +1,20 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::app::SynapseService;
+// ── Submodules ────────────────────────────────────────────────────────────────
+
+mod dispatch;
+mod flux;
+mod scout;
+
+// ── Re-exports (keep crate::actions::X resolving for all callers) ─────────────
+
+pub use dispatch::{execute_service_action, is_confirmation_denied, is_validation_error};
+pub use flux::{ComposeArgs, ContainerArgs, DockerArgs, HostArgs};
+pub use scout::{
+    ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs, ScoutEmitTarget, ScoutExecArgs, ScoutFindArgs,
+    ScoutPsArgs,
+};
 
 // ── Validation error type ─────────────────────────────────────────────────────
 
@@ -35,6 +48,8 @@ impl std::fmt::Display for ValidationError {
 }
 
 impl std::error::Error for ValidationError {}
+
+// ── Scope constants & helpers ─────────────────────────────────────────────────
 
 pub const READ_SCOPE: &str = "synapse:read";
 pub const WRITE_SCOPE: &str = "synapse:write";
@@ -214,165 +229,7 @@ fn action_spec(action: &str) -> Option<&'static ActionSpec> {
     ACTION_SPECS.iter().find(|spec| spec.name == action)
 }
 
-/// Parsed parameters for `flux container` subactions.
-///
-/// Boxed inside [`SynapseAction::FluxContainer`] (and mirrored by the CLI
-/// `Command`) so the enum stays small — every read-only container subaction's
-/// params live here. Extraction stays in the shim; logic lives in `FluxService`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ContainerArgs {
-    pub subaction: String,
-    pub container_id: Option<String>,
-    pub host: Option<String>,
-    pub lines: Option<u32>,
-    // list filters
-    pub state: Option<String>,
-    pub name_filter: Option<String>,
-    pub image_filter: Option<String>,
-    pub label_filter: Option<String>,
-    // logs params
-    pub since: Option<String>,
-    pub until: Option<String>,
-    pub grep: Option<String>,
-    pub stream: Option<String>,
-    // inspect param
-    pub summary: Option<bool>,
-    // search param
-    pub query: Option<String>,
-}
-
-/// Parsed parameters for `flux docker` subactions.
-///
-/// Boxed inside [`SynapseAction::FluxDocker`] (and mirrored by the CLI) so the
-/// enum stays small. Extraction stays in the shim; all logic (validation,
-/// fanout, gating) lives in `FluxService` / the `docker` submodule.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct DockerArgs {
-    pub subaction: String,
-    pub host: Option<String>,
-    // images
-    pub dangling_only: Option<bool>,
-    // pull / rmi / build
-    pub image: Option<String>,
-    pub force: Option<bool>,
-    pub context: Option<String>,
-    pub tag: Option<String>,
-    pub dockerfile: Option<String>,
-    pub no_cache: Option<bool>,
-    // prune
-    pub prune_target: Option<String>,
-}
-
-/// Parsed parameters for `flux host` subactions (B11).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HostArgs {
-    pub subaction: String,
-    /// Target host name (None = fan out to all hosts).
-    pub host: Option<String>,
-    // services params
-    pub state: Option<String>,
-    pub service: Option<String>,
-    // ports params
-    pub protocol: Option<String>,
-    pub limit: Option<u32>,
-    pub offset: Option<u32>,
-    // doctor params
-    pub checks: Option<String>, // comma-separated check names
-}
-
-/// Parsed parameters for `flux compose` subactions (B13).
-///
-/// Boxed inside [`SynapseAction::FluxCompose`] so the enum stays small.
-/// Extraction lives in the shim; all logic lives in `FluxService`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ComposeArgs {
-    /// Subaction: list|status|up|down|restart|recreate|logs|build|pull|refresh.
-    pub subaction: String,
-    /// Target host name. Required for all subactions except `list` (where it is
-    /// also required — compose ops are always single-host).
-    pub host: Option<String>,
-    /// Compose project name. Required for all subactions except `list`/`refresh`.
-    pub project: Option<String>,
-    // down params
-    pub remove_volumes: Option<bool>,
-    pub force: Option<bool>,
-    // logs params
-    pub lines: Option<u32>,
-    pub since: Option<String>,
-    /// Single service filter for `logs`/`status`.
-    pub service: Option<String>,
-    // build/pull: same `service` field above
-}
-
-/// Parsed parameters for `scout find` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutFindArgs {
-    pub host: String,
-    pub path: String,
-    pub pattern: String,
-    pub depth: Option<u8>,
-    pub limit: Option<u32>,
-}
-
-/// Parsed parameters for `scout ps` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutPsArgs {
-    pub host: String,
-    pub sort: Option<String>,
-    pub grep: Option<String>,
-    pub user: Option<String>,
-    pub limit: Option<u32>,
-}
-
-/// Parsed parameters for `scout delta` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutDeltaArgs {
-    /// Source `{host, path}`.
-    pub source_host: String,
-    pub source_path: String,
-    /// Target `{host, path}` (mutually exclusive with `content`).
-    pub target_host: Option<String>,
-    pub target_path: Option<String>,
-    /// Inline content to compare against (capped at 1 MB).
-    pub content: Option<String>,
-}
-
-/// Parsed parameters for `scout exec` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutExecArgs {
-    pub host: String,
-    /// Optional working directory (local only; ignored for SSH).
-    pub path: Option<String>,
-    pub command: String,
-    /// Additional positional arguments (execvp-style, no shell).
-    pub args: Vec<String>,
-    pub timeout_secs: Option<u64>,
-}
-
-/// A single target for `scout emit`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutEmitTarget {
-    pub host: String,
-    pub path: Option<String>,
-}
-
-/// Parsed parameters for `scout emit` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutEmitArgs {
-    pub targets: Vec<ScoutEmitTarget>,
-    pub command: String,
-    pub args: Vec<String>,
-    pub timeout_secs: Option<u64>,
-}
-
-/// Parsed parameters for `scout beam` (B14).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScoutBeamArgs {
-    pub source_host: String,
-    pub source_path: String,
-    pub dest_host: String,
-    pub dest_path: String,
-}
+// ── SynapseAction enum ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
@@ -420,507 +277,9 @@ impl SynapseAction {
             Self::ScoutBeam(_) => "beam",
         }
     }
-
-    pub fn from_flux_args(args: &Value) -> Result<Self> {
-        let action = args
-            .get("action")
-            .and_then(Value::as_str)
-            .ok_or(ValidationError::MissingAction)?;
-        match action {
-            "help" => Ok(Self::FluxHelp),
-            "docker" => Ok(Self::FluxDocker(Box::new(DockerArgs {
-                subaction: required_string_param(args, "subaction")?,
-                host: optional_string_param(args, "host")?,
-                dangling_only: optional_bool_param(args, "dangling_only")?,
-                image: optional_string_param(args, "image")?,
-                force: optional_bool_param(args, "force")?,
-                context: optional_string_param(args, "context")?,
-                tag: optional_string_param(args, "tag")?,
-                dockerfile: optional_string_param(args, "dockerfile")?,
-                no_cache: optional_bool_param(args, "no_cache")?,
-                prune_target: optional_string_param(args, "prune_target")?,
-            }))),
-            "container" => {
-                // Validate `response_format` at the shim per B4 contract (no-op
-                // on output shape today; full rendering wiring is a separate
-                // codebase-wide concern). Invalid value → hard error.
-                if let Some(rf) = optional_string_param(args, "response_format")? {
-                    crate::formatters::ResponseFormat::parse(Some(&rf))
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                }
-                Ok(Self::FluxContainer(Box::new(ContainerArgs {
-                    subaction: required_string_param(args, "subaction")?,
-                    container_id: optional_string_param(args, "container_id")?,
-                    host: optional_string_param(args, "host")?,
-                    lines: optional_u32_param(args, "lines")?,
-                    state: optional_string_param(args, "state")?,
-                    name_filter: optional_string_param(args, "name_filter")?,
-                    image_filter: optional_string_param(args, "image_filter")?,
-                    label_filter: optional_string_param(args, "label_filter")?,
-                    since: optional_string_param(args, "since")?,
-                    until: optional_string_param(args, "until")?,
-                    grep: optional_string_param(args, "grep")?,
-                    stream: optional_string_param(args, "stream")?,
-                    summary: optional_bool_param(args, "summary")?,
-                    query: optional_string_param(args, "query")?,
-                })))
-            }
-            "host" => Ok(Self::FluxHost(Box::new(HostArgs {
-                subaction: required_string_param(args, "subaction")?,
-                host: optional_string_param(args, "host")?,
-                state: optional_string_param(args, "state")?,
-                service: optional_string_param(args, "service")?,
-                protocol: optional_string_param(args, "protocol")?,
-                limit: optional_u32_param(args, "limit")?,
-                offset: optional_u32_param(args, "offset")?,
-                checks: optional_string_param(args, "checks")?,
-            }))),
-            "compose" => Ok(Self::FluxCompose(Box::new(ComposeArgs {
-                subaction: required_string_param(args, "subaction")?,
-                host: optional_string_param(args, "host")?,
-                project: optional_string_param(args, "project")?,
-                remove_volumes: optional_bool_param(args, "remove_volumes")?,
-                force: optional_bool_param(args, "force")?,
-                lines: optional_u32_param(args, "lines")?,
-                since: optional_string_param(args, "since")?,
-                service: optional_string_param(args, "service")?,
-            }))),
-            other => Err(ValidationError::UnknownAction {
-                action: other.to_owned(),
-            }
-            .into()),
-        }
-    }
-
-    pub fn from_scout_args(args: &Value) -> Result<Self> {
-        let action = args
-            .get("action")
-            .and_then(Value::as_str)
-            .ok_or(ValidationError::MissingAction)?;
-        match action {
-            "help" => Ok(Self::ScoutHelp),
-            "nodes" => Ok(Self::ScoutNodes),
-            "peek" => Ok(Self::ScoutPeek {
-                host: required_string_param(args, "host")?,
-                path: required_string_param(args, "path")?,
-                tree: optional_bool_param(args, "tree")?.unwrap_or(false),
-                depth: optional_u32_param(args, "depth")?
-                    .map(|d| d.clamp(1, 10) as u8)
-                    .unwrap_or(3),
-            }),
-            "find" => Ok(Self::ScoutFind(Box::new(ScoutFindArgs {
-                host: required_string_param(args, "host")?,
-                path: required_string_param(args, "path")?,
-                pattern: required_string_param(args, "pattern")?,
-                depth: optional_u32_param(args, "depth")?.map(|d| d.clamp(1, 20) as u8),
-                limit: optional_u32_param(args, "limit")?,
-            }))),
-            "ps" => Ok(Self::ScoutPs(Box::new(ScoutPsArgs {
-                host: required_string_param(args, "host")?,
-                sort: optional_string_param(args, "sort")?,
-                grep: optional_string_param(args, "grep")?,
-                user: optional_string_param(args, "user")?,
-                limit: optional_u32_param(args, "limit")?,
-            }))),
-            "df" => Ok(Self::ScoutDf {
-                host: required_string_param(args, "host")?,
-                path: optional_string_param(args, "path")?,
-            }),
-            "delta" => Ok(Self::ScoutDelta(Box::new(ScoutDeltaArgs {
-                source_host: required_string_param(args, "source_host")?,
-                source_path: required_string_param(args, "source_path")?,
-                target_host: optional_string_param(args, "target_host")?,
-                target_path: optional_string_param(args, "target_path")?,
-                content: optional_string_param(args, "content")?,
-            }))),
-            "exec" => Ok(Self::ScoutExec(Box::new(ScoutExecArgs {
-                host: required_string_param(args, "host")?,
-                path: optional_string_param(args, "path")?,
-                command: required_string_param(args, "command")?,
-                args: optional_string_array_param(args, "args")?,
-                timeout_secs: optional_u32_param(args, "timeout_secs")?.map(|v| v as u64),
-            }))),
-            "emit" => {
-                let raw_targets =
-                    args.get("targets")
-                        .and_then(Value::as_array)
-                        .ok_or_else(|| ValidationError::MissingField {
-                            field: "targets".into(),
-                        })?;
-                let targets: Result<Vec<ScoutEmitTarget>> = raw_targets
-                    .iter()
-                    .map(|t| {
-                        Ok(ScoutEmitTarget {
-                            host: t
-                                .get("host")
-                                .and_then(Value::as_str)
-                                .ok_or_else(|| ValidationError::MissingField {
-                                    field: "targets[].host".into(),
-                                })?
-                                .to_owned(),
-                            path: t.get("path").and_then(Value::as_str).map(|s| s.to_owned()),
-                        })
-                    })
-                    .collect();
-                Ok(Self::ScoutEmit(Box::new(ScoutEmitArgs {
-                    targets: targets?,
-                    command: required_string_param(args, "command")?,
-                    args: optional_string_array_param(args, "args")?,
-                    timeout_secs: optional_u32_param(args, "timeout_secs")?.map(|v| v as u64),
-                })))
-            }
-            "beam" => Ok(Self::ScoutBeam(Box::new(ScoutBeamArgs {
-                source_host: required_string_param(args, "source_host")?,
-                source_path: required_string_param(args, "source_path")?,
-                dest_host: required_string_param(args, "dest_host")?,
-                dest_path: required_string_param(args, "dest_path")?,
-            }))),
-            other => Err(ValidationError::UnknownAction {
-                action: other.to_owned(),
-            }
-            .into()),
-        }
-    }
 }
 
-pub async fn execute_service_action(
-    service: &SynapseService,
-    action: &SynapseAction,
-    confirmer: &dyn crate::elicitation_gate::Confirmer,
-) -> Result<Value> {
-    match action {
-        SynapseAction::FluxHelp => service.flux().help().await,
-        SynapseAction::FluxDocker(args) => dispatch_flux_docker(service, args, confirmer).await,
-        SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
-        SynapseAction::FluxHost(args) => dispatch_flux_host(service, args).await,
-        SynapseAction::FluxCompose(args) => dispatch_flux_compose(service, args, confirmer).await,
-        SynapseAction::ScoutHelp => service.scout().help().await,
-        SynapseAction::ScoutNodes => service.scout().nodes().await,
-        SynapseAction::ScoutPeek {
-            host,
-            path,
-            tree,
-            depth,
-        } => service.scout().peek(host, path, *tree, *depth).await,
-        SynapseAction::ScoutFind(a) => {
-            service
-                .scout()
-                .find(&a.host, &a.path, &a.pattern, a.depth, a.limit)
-                .await
-        }
-        SynapseAction::ScoutPs(a) => {
-            service
-                .scout()
-                .ps(
-                    &a.host,
-                    a.sort.as_deref(),
-                    a.grep.as_deref(),
-                    a.user.as_deref(),
-                    a.limit,
-                )
-                .await
-        }
-        SynapseAction::ScoutDf { host, path } => service.scout().df(host, path.as_deref()).await,
-        SynapseAction::ScoutDelta(a) => {
-            service
-                .scout()
-                .delta(
-                    &a.source_host,
-                    &a.source_path,
-                    a.target_host.as_deref(),
-                    a.target_path.as_deref(),
-                    a.content.as_deref(),
-                )
-                .await
-        }
-        SynapseAction::ScoutExec(a) => {
-            service
-                .scout()
-                .exec(&a.host, a.path.as_deref(), &a.command, &a.args, confirmer)
-                .await
-        }
-        SynapseAction::ScoutEmit(a) => {
-            let targets = service.scout().resolve_emit_targets(
-                &a.targets
-                    .iter()
-                    .map(|t| (t.host.clone(), t.path.clone()))
-                    .collect::<Vec<_>>(),
-            )?;
-            service
-                .scout()
-                .emit(&targets, &a.command, &a.args, a.timeout_secs, confirmer)
-                .await
-        }
-        SynapseAction::ScoutBeam(a) => {
-            service
-                .scout()
-                .beam(
-                    &a.source_host,
-                    &a.source_path,
-                    &a.dest_host,
-                    &a.dest_path,
-                    confirmer,
-                )
-                .await
-        }
-    }
-}
-
-/// Dispatch a `flux docker` subaction to the [`FluxService`].
-///
-/// Thin: validate/extract params and call the matching service method. The
-/// destructive gate (`build`/`rmi`/`prune`) is enforced INSIDE the service
-/// method via the supplied `confirmer` — never here.
-async fn dispatch_flux_docker(
-    service: &SynapseService,
-    args: &DockerArgs,
-    confirmer: &dyn crate::elicitation_gate::Confirmer,
-) -> Result<Value> {
-    use crate::flux_service::docker::{build_args, PruneTarget};
-    let flux = service.flux();
-    let host = args.host.as_deref();
-    match args.subaction.as_str() {
-        "info" => flux.docker_info(host).await,
-        "df" => flux.docker_df(host).await,
-        "images" => {
-            flux.docker_images(host, args.dangling_only.unwrap_or(false))
-                .await
-        }
-        "networks" => flux.docker_networks(host).await,
-        "volumes" => flux.docker_volumes(host).await,
-        "pull" => {
-            let image = require_field(&args.image, "image")?;
-            flux.docker_pull(require_field(&args.host, "host")?, image)
-                .await
-        }
-        "build" => {
-            let context = require_field(&args.context, "context")?;
-            let tag = require_field(&args.tag, "tag")?;
-            let built = build_args(
-                context,
-                tag,
-                args.dockerfile.as_deref(),
-                args.no_cache.unwrap_or(false),
-            )?;
-            flux.docker_build(require_field(&args.host, "host")?, built, confirmer)
-                .await
-        }
-        "rmi" => {
-            let image = require_field(&args.image, "image")?;
-            let force = args.force.unwrap_or(false);
-            if !force {
-                return Err(ValidationError::MissingField {
-                    field: "force (rmi requires force=true)".into(),
-                }
-                .into());
-            }
-            flux.docker_rmi(require_field(&args.host, "host")?, image, force, confirmer)
-                .await
-        }
-        "prune" => {
-            let target_str = require_field(&args.prune_target, "prune_target")?;
-            let target = PruneTarget::parse(target_str)?;
-            if !args.force.unwrap_or(false) {
-                return Err(ValidationError::MissingField {
-                    field: "force (prune requires force=true)".into(),
-                }
-                .into());
-            }
-            flux.docker_prune(require_field(&args.host, "host")?, target, confirmer)
-                .await
-        }
-        other => Err(ValidationError::UnknownAction {
-            action: format!("docker:{other}"),
-        }
-        .into()),
-    }
-}
-
-/// Dispatch a `flux container` read-only subaction to the [`FluxService`].
-///
-/// Thin: extracts the parsed [`ContainerArgs`] and calls the matching service
-/// method. All filtering/fanout logic lives in `FluxService` / `container_read`.
-async fn dispatch_flux_container(service: &SynapseService, args: &ContainerArgs) -> Result<Value> {
-    use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
-    let flux = service.flux();
-    let host = args.host.as_deref();
-    match args.subaction.as_str() {
-        "list" => {
-            let filters = ListFilters {
-                state: args.state.clone(),
-                name_filter: args.name_filter.clone(),
-                image_filter: args.image_filter.clone(),
-                label_filter: args.label_filter.clone(),
-            };
-            flux.container_list(host, filters).await
-        }
-        "search" => {
-            let q = args.query.as_deref().ok_or(ValidationError::MissingField {
-                field: "query".into(),
-            })?;
-            flux.container_search(host, q).await
-        }
-        "stats" => {
-            flux.container_stats(host, args.container_id.as_deref())
-                .await
-        }
-        "inspect" => {
-            flux.container_inspect(
-                host,
-                require_container_id(&args.container_id)?,
-                args.summary.unwrap_or(false),
-            )
-            .await
-        }
-        "top" => {
-            flux.container_top(host, require_container_id(&args.container_id)?)
-                .await
-        }
-        "logs" => {
-            let opts = LogOptions {
-                lines: args.lines.unwrap_or(DEFAULT_LOG_LINES),
-                since: args.since.clone(),
-                until: args.until.clone(),
-                grep: args.grep.clone(),
-                stream: args.stream.clone().unwrap_or_else(|| "both".to_owned()),
-            };
-            flux.container_logs(host, require_container_id(&args.container_id)?, opts)
-                .await
-        }
-        other => Err(ValidationError::UnknownAction {
-            action: format!("container:{other}"),
-        }
-        .into()),
-    }
-}
-
-/// Dispatch a `flux host` subaction to the [`FluxService`].
-///
-/// Thin: extracts the parsed [`HostArgs`] and calls the matching service method.
-/// All shell execution / fanout logic lives in `FluxService` / the `host` submodule.
-async fn dispatch_flux_host(service: &SynapseService, args: &HostArgs) -> Result<Value> {
-    let flux = service.flux();
-    let host = args.host.as_deref();
-    match args.subaction.as_str() {
-        "status" => flux.host_status(host).await,
-        "info" => flux.host_info(host).await,
-        "uptime" => flux.host_uptime(host).await,
-        "resources" => flux.host_resources(host).await,
-        "services" => {
-            let h = require_field(&args.host, "host")?;
-            flux.host_services(h, args.state.as_deref(), args.service.as_deref())
-                .await
-        }
-        "network" => flux.host_network(host).await,
-        "mounts" => {
-            let h = require_field(&args.host, "host")?;
-            flux.host_mounts(h).await
-        }
-        "ports" => {
-            let h = require_field(&args.host, "host")?;
-            let limit = args.limit.map(|v| v as usize);
-            let offset = args.offset.map(|v| v as usize);
-            flux.host_ports(h, args.protocol.as_deref(), limit, offset)
-                .await
-        }
-        "doctor" => {
-            let h = require_field(&args.host, "host")?;
-            let checks: Vec<String> = match &args.checks {
-                Some(s) if !s.is_empty() => s.split(',').map(|c| c.trim().to_owned()).collect(),
-                _ => crate::flux_service::host::DEFAULT_DOCTOR_CHECKS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            };
-            flux.host_doctor(h, checks).await
-        }
-        other => Err(ValidationError::UnknownAction {
-            action: format!("host:{other}"),
-        }
-        .into()),
-    }
-}
-
-/// Dispatch a `flux compose` subaction to the [`FluxService`].
-///
-/// Thin: validates required params and calls the matching service method.
-/// Gating (`down`/`restart`/`recreate`) is enforced INSIDE the service methods
-/// via the supplied `confirmer` — not here.
-async fn dispatch_flux_compose(
-    service: &SynapseService,
-    args: &ComposeArgs,
-    confirmer: &dyn crate::elicitation_gate::Confirmer,
-) -> Result<Value> {
-    use crate::flux_service::compose_ops::{ComposeLogOptions, DownArgs};
-    let flux = service.flux();
-    let host = require_field(&args.host, "host")?;
-    match args.subaction.as_str() {
-        "list" => {
-            let projects = flux.compose_list(host).await?;
-            let items: Vec<Value> = projects
-                .iter()
-                .map(|p| serde_json::to_value(p).unwrap_or(Value::Null))
-                .collect();
-            Ok(json!({
-                "host": host,
-                "count": items.len(),
-                "projects": items,
-            }))
-        }
-        "refresh" => {
-            flux.compose_refresh(Some(host));
-            Ok(json!({ "host": host, "refreshed": true }))
-        }
-        "status" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_status(host, project, args.service.as_deref())
-                .await
-        }
-        "up" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_up(host, project).await
-        }
-        "down" => {
-            let project = require_field(&args.project, "project")?;
-            let down_args = DownArgs {
-                remove_volumes: args.remove_volumes.unwrap_or(false),
-                force: args.force.unwrap_or(false),
-            };
-            flux.compose_down(host, project, down_args, confirmer).await
-        }
-        "restart" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_restart(host, project, confirmer).await
-        }
-        "recreate" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_recreate(host, project, confirmer).await
-        }
-        "logs" => {
-            let project = require_field(&args.project, "project")?;
-            let opts = ComposeLogOptions {
-                lines: args.lines,
-                since: args.since.clone(),
-                service: args.service.clone(),
-            };
-            flux.compose_logs(host, project, opts).await
-        }
-        "build" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_build(host, project, args.service.as_deref())
-                .await
-        }
-        "pull" => {
-            let project = require_field(&args.project, "project")?;
-            flux.compose_pull(host, project, args.service.as_deref())
-                .await
-        }
-        other => Err(ValidationError::UnknownAction {
-            action: format!("compose:{other}"),
-        }
-        .into()),
-    }
-}
+// ── REST help ─────────────────────────────────────────────────────────────────
 
 pub fn rest_help() -> Value {
     json!({
@@ -934,13 +293,15 @@ pub fn rest_help() -> Value {
     })
 }
 
-fn required_string_param(params: &Value, name: &str) -> Result<String> {
+// ── Shared param helpers (used by flux.rs and scout.rs via super::) ───────────
+
+pub(crate) fn required_string_param(params: &Value, name: &str) -> Result<String> {
     optional_string_param(params, name)?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ValidationError::MissingField { field: name.into() }.into())
 }
 
-fn optional_string_param(params: &Value, name: &str) -> Result<Option<String>> {
+pub(crate) fn optional_string_param(params: &Value, name: &str) -> Result<Option<String>> {
     match params.get(name) {
         None => Ok(None),
         Some(value) => value
@@ -952,7 +313,7 @@ fn optional_string_param(params: &Value, name: &str) -> Result<Option<String>> {
 
 /// Require a non-empty optional string field, returning a `MissingField`
 /// validation error when absent or empty.
-fn require_field<'a>(value: &'a Option<String>, name: &str) -> Result<&'a str> {
+pub(crate) fn require_field<'a>(value: &'a Option<String>, name: &str) -> Result<&'a str> {
     value
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -960,7 +321,7 @@ fn require_field<'a>(value: &'a Option<String>, name: &str) -> Result<&'a str> {
 }
 
 /// Require a `container_id` for single-container subactions.
-fn require_container_id(container_id: &Option<String>) -> Result<&str> {
+pub(crate) fn require_container_id(container_id: &Option<String>) -> Result<&str> {
     container_id
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -972,7 +333,7 @@ fn require_container_id(container_id: &Option<String>) -> Result<&str> {
         })
 }
 
-fn optional_bool_param(params: &Value, name: &str) -> Result<Option<bool>> {
+pub(crate) fn optional_bool_param(params: &Value, name: &str) -> Result<Option<bool>> {
     match params.get(name) {
         None => Ok(None),
         Some(value) => value
@@ -982,7 +343,7 @@ fn optional_bool_param(params: &Value, name: &str) -> Result<Option<bool>> {
     }
 }
 
-fn optional_u32_param(params: &Value, name: &str) -> Result<Option<u32>> {
+pub(crate) fn optional_u32_param(params: &Value, name: &str) -> Result<Option<u32>> {
     match params.get(name) {
         None => Ok(None),
         Some(value) => value
@@ -995,7 +356,7 @@ fn optional_u32_param(params: &Value, name: &str) -> Result<Option<u32>> {
 
 /// Extract an optional array of strings from `params[name]`.
 /// Returns an empty `Vec` when the key is absent; errors on type mismatch.
-fn optional_string_array_param(params: &Value, name: &str) -> Result<Vec<String>> {
+pub(crate) fn optional_string_array_param(params: &Value, name: &str) -> Result<Vec<String>> {
     match params.get(name) {
         None => Ok(Vec::new()),
         Some(Value::Array(arr)) => arr
@@ -1011,22 +372,6 @@ fn optional_string_array_param(params: &Value, name: &str) -> Result<Vec<String>
             .collect(),
         Some(_) => Err(ValidationError::WrongType { field: name.into() }.into()),
     }
-}
-
-pub fn is_validation_error(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<ValidationError>().is_some()
-        || error
-            .downcast_ref::<crate::app::ScaffoldIntentValidationError>()
-            .is_some()
-}
-
-/// True when `error` is a destructive-op confirmation denial (B5 gate). The MCP
-/// boundary maps these to `ErrorData::invalid_request` (per the bead's
-/// hard-block contract), distinct from `invalid_params` validation errors.
-pub fn is_confirmation_denied(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<crate::elicitation_gate::ConfirmationDenied>()
-        .is_some()
 }
 
 #[cfg(test)]
