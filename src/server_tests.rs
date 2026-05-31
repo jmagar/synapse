@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{AuthConfig, SynapseConfig};
+use crate::config::AuthConfig;
 
 fn config(host: &str) -> Config {
     Config {
@@ -7,7 +7,6 @@ fn config(host: &str) -> Config {
             host: host.into(),
             ..McpConfig::default()
         },
-        synapse2: SynapseConfig::default(),
     }
 }
 

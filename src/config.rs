@@ -2,14 +2,12 @@
 //!
 //! Values are loaded in priority order:
 //!   1. `config.toml` (checked in, defaults only — no secrets)
-//!   2. Environment variables (`SYNAPSE_*`, `SYNAPSE_MCP_*`)
-//!
-//! **Template**: rename `SynapseConfig` to match your service. Adjust env prefixes
-//! throughout. Add any domain-specific config fields you need.
+//!   2. Environment variables (`SYNAPSE_MCP_*` for the server; host topology is
+//!      loaded separately in `host_config.rs` via `SYNAPSE_HOSTS_CONFIG` /
+//!      `SYNAPSE_CONFIG_FILE` / `~/.ssh/config`).
 
 use serde::{Deserialize, Serialize};
 
-/// TEMPLATE: Replace with your service name (e.g. ".unraid", ".gotify").
 const SERVICE_HOME_DIRNAME: &str = ".synapse2";
 
 /// Top-level config (maps to `config.toml` sections).
@@ -17,20 +15,6 @@ const SERVICE_HOME_DIRNAME: &str = ".synapse2";
 #[serde(default)]
 pub struct Config {
     pub mcp: McpConfig,
-    pub synapse2: SynapseConfig,
-}
-
-/// Config for the synapse2 remote service (the thing this MCP server wraps).
-///
-/// **Template**: replace this with config for your actual upstream service.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct SynapseConfig {
-    /// Full endpoint URL of the remote service (SYNAPSE_API_URL).
-    /// Example: `https://api.synapse2.com/v1`
-    pub api_url: String,
-    /// API key or bearer token (SYNAPSE_API_KEY).
-    pub api_key: String,
 }
 
 /// MCP HTTP server configuration.
@@ -304,10 +288,6 @@ impl Config {
                 };
             }
         }
-
-        // Upstream service config
-        env_str("SYNAPSE_API_URL", &mut config.synapse2.api_url);
-        env_str("SYNAPSE_API_KEY", &mut config.synapse2.api_key);
 
         Ok(config)
     }

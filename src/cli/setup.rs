@@ -121,19 +121,6 @@ fn setup_check(config: &Config, no_repair: bool) -> SetupReport {
             ),
         });
     }
-    if config.synapse2.api_url.is_empty() {
-        report.blocking_failures.push(SetupFailure {
-            code: "missing_example_api_url",
-            message: "SYNAPSE_API_URL is required".into(),
-        });
-    }
-    if config.synapse2.api_key.is_empty() {
-        report.blocking_failures.push(SetupFailure {
-            code: "missing_example_api_key",
-            message: "SYNAPSE_API_KEY is required".into(),
-        });
-    }
-
     check_auth(config, &mut report);
     check_port(&config.mcp.host, config.mcp.port, &mut report);
 
@@ -240,8 +227,6 @@ fn setup_data_dir() -> anyhow::Result<PathBuf> {
 
 fn write_env(data_dir: &Path, config: &Config) -> Result<()> {
     let mut lines = vec![
-        dotenv_assignment("SYNAPSE_API_URL", &config.synapse2.api_url)?,
-        dotenv_assignment("SYNAPSE_API_KEY", &config.synapse2.api_key)?,
         dotenv_assignment("SYNAPSE_MCP_HOST", &config.mcp.host)?,
         dotenv_assignment("SYNAPSE_MCP_PORT", &config.mcp.port.to_string())?,
         dotenv_assignment("SYNAPSE_MCP_NO_AUTH", &config.mcp.no_auth.to_string())?,

@@ -49,8 +49,8 @@ fn plugin_manifests_share_identity_and_connection_settings() {
     for key in [
         "server_url",
         "api_token",
-        "synapse_api_url",
-        "synapse_api_key",
+        "synapse_hosts_config",
+        "synapse_config_file",
     ] {
         assert!(
             user_config.contains_key(key),
@@ -67,8 +67,8 @@ fn plugin_manifests_share_identity_and_connection_settings() {
     for key in [
         "server_url",
         "api_token",
-        "synapse_api_url",
-        "synapse_api_key",
+        "synapse_hosts_config",
+        "synapse_config_file",
     ] {
         assert!(
             gemini_settings.contains(&key),
@@ -146,8 +146,6 @@ fn setup_command(data_dir: &std::path::Path) -> Command {
         .env("HOME", data_dir)
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("CLAUDE_PLUGIN_DATA", data_dir)
-        .env("SYNAPSE_API_URL", "https://api.synapse2.test")
-        .env("SYNAPSE_API_KEY", "synapse2-secret")
         .env("SYNAPSE_MCP_PORT", "0")
         .env("SYNAPSE_MCP_TOKEN", "mcp-secret");
     cmd
@@ -198,8 +196,7 @@ fn setup_repair_creates_env_file_without_upstream_contact() {
     assert_eq!(json["no_repair"], false);
 
     let env_file = std::fs::read_to_string(missing.join(".env")).unwrap();
-    assert!(env_file.contains("SYNAPSE_API_URL=https://api.synapse2.test"));
-    assert!(env_file.contains("SYNAPSE_API_KEY=synapse2-secret"));
+    assert!(env_file.contains("SYNAPSE_MCP_HOST="));
     assert!(env_file.contains("SYNAPSE_MCP_TOKEN=mcp-secret"));
     assert_env_file_mode(missing.join(".env").as_path());
 }
@@ -223,7 +220,7 @@ fn setup_repair_replaces_existing_env_file_with_private_mode() {
 
     let env_file = fs::read_to_string(&env_path).unwrap();
     assert!(!env_file.contains("OLD_VALUE"));
-    assert!(env_file.contains("SYNAPSE_API_URL=https://api.synapse2.test"));
+    assert!(env_file.contains("SYNAPSE_MCP_HOST="));
     assert_env_file_mode(&env_path);
 }
 
@@ -255,8 +252,6 @@ fn oauth_setup_command(data_dir: &std::path::Path) -> Command {
         .env("HOME", data_dir)
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("CLAUDE_PLUGIN_DATA", data_dir)
-        .env("SYNAPSE_API_URL", "https://api.synapse2.test")
-        .env("SYNAPSE_API_KEY", "synapse2-secret")
         .env("SYNAPSE_MCP_PORT", "0")
         .env("SYNAPSE_MCP_AUTH_MODE", "oauth")
         .env("SYNAPSE_MCP_PUBLIC_URL", "https://mcp.synapse2.test")

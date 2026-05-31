@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use super::{SetupCommand, SetupReport};
-use crate::config::{Config, McpConfig, SynapseConfig};
+use crate::config::{Config, McpConfig};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -88,10 +88,6 @@ fn all_variants_are_distinct() {
 
 fn valid_config() -> Config {
     Config {
-        synapse2: SynapseConfig {
-            api_url: "https://synapse2.test/api".into(),
-            api_key: "secret with spaces".into(),
-        },
         mcp: McpConfig {
             host: "127.0.0.1".into(),
             no_auth: true,
@@ -152,8 +148,8 @@ fn setup_repair_creates_env_file() {
     assert!(report.blocking_failures.is_empty());
     let env_path = dir.path().join(".env");
     let contents = std::fs::read_to_string(&env_path).unwrap();
-    assert!(contents.contains("SYNAPSE_API_URL=https://synapse2.test/api"));
-    assert!(contents.contains("SYNAPSE_API_KEY=\"secret with spaces\""));
+    assert!(contents.contains("SYNAPSE_MCP_HOST=127.0.0.1"));
+    assert!(contents.contains("SYNAPSE_MCP_NO_AUTH=true"));
 
     #[cfg(unix)]
     {
@@ -166,13 +162,13 @@ fn setup_repair_creates_env_file() {
 #[test]
 fn dotenv_values_quote_special_characters_and_escape_quotes() {
     assert_eq!(
-        super::dotenv_assignment("SYNAPSE_API_KEY", "secret # \"quoted\"").unwrap(),
-        "SYNAPSE_API_KEY=\"secret # \\\"quoted\\\"\""
+        super::dotenv_assignment("SYNAPSE_MCP_TOKEN", "secret # \"quoted\"").unwrap(),
+        "SYNAPSE_MCP_TOKEN=\"secret # \\\"quoted\\\"\""
     );
 }
 
 #[test]
 fn dotenv_values_reject_newlines() {
-    let error = super::dotenv_assignment("SYNAPSE_API_KEY", "line\nbreak").unwrap_err();
+    let error = super::dotenv_assignment("SYNAPSE_MCP_TOKEN", "line\nbreak").unwrap_err();
     assert!(error.to_string().contains("newlines"));
 }

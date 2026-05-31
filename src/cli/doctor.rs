@@ -13,23 +13,20 @@
 //!
 //! # TEMPLATE
 //!
-//! This is the reference implementation for the synapse2 family. When you
-//! clone the template for a real service, the things you MUST change are:
+//! Doctor validates the local environment: config file presence, writable data
+//! and log directories, the binary on PATH, MCP port availability, and auth
+//! configuration. Host topology (SYNAPSE_HOSTS_CONFIG / SYNAPSE_CONFIG_FILE /
+//! ~/.ssh/config) is resolved lazily by flux/scout, so there is no startup
+//! credential to validate here.
 //!
-//! 1. Replace `SYNAPSE_API_URL` / `SYNAPSE_API_KEY` with your service's env vars.
-//! 2. Replace `"synapse2"` binary name with your binary name in `check_binary_in_path`.
-//! 3. Replace `~/.synapse2/` data dir with your service's data dir (see `config::default_data_dir`).
-//! 4. Add any service-specific checks (e.g. database connectivity, auth token format).
-//! 5. Update the `print_doctor_report` section headings and hint text to match your service.
-//!
-//! Nothing else here needs changing for a basic deployment. Business logic for the
-//! checks belongs in the individual `check_*` functions — never in `run_doctor`.
+//! Business logic for the checks belongs in the individual `check_*` functions —
+//! never in `run_doctor`.
 
 mod checks;
 
 use checks::{
     check_auth_config, check_binary_in_path, check_config_file, check_dir_writable,
-    check_port_available, check_required_var, check_upstream,
+    check_port_available,
 };
 
 use anyhow::{bail, Result};
@@ -66,39 +63,14 @@ pub async fn run_doctor(config: &Config, json: bool) -> Result<()> {
     // TEMPLATE: Replace "synapse2" with your binary name (Cargo.toml [[bin]] name).
     checks.push(check_binary_in_path("synapse2"));
 
-    // ── 3. Required environment variables / config ────────────────────────────
+    // ── 3. MCP server port ────────────────────────────────────────────────────
     //
-    // TEMPLATE: Replace these with your service's required vars. Mark vars that
-    //           have safe defaults as optional (they will warn, not fail).
-    //
-    // Required vars fail with ✗.  Optional vars warn with ⚠.
-    checks.push(check_required_var(
-        "SYNAPSE_API_URL",
-        &config.synapse2.api_url,
-    ));
-    checks.push(check_required_var(
-        "SYNAPSE_API_KEY",
-        &config.synapse2.api_key,
-    ));
-
-    // ── 4. Upstream connectivity ──────────────────────────────────────────────
-    //
-    // TEMPLATE: Adjust the health path for your upstream service.
-    //           If the URL is empty we skip the check — the required-var check
-    //           above already flagged it.
-    if !config.synapse2.api_url.is_empty() {
-        // TEMPLATE: Replace "/health" with your upstream's health or ping endpoint.
-        //           If your upstream has no health endpoint, do a simple HEAD / request.
-        checks.push(check_upstream(&config.synapse2.api_url).await);
-    }
-
-    // ── 5. MCP server port ────────────────────────────────────────────────────
-    //
-    // TEMPLATE: config.mcp.port defaults to 3000 for the template.
-    //           Your service's port is set in config.toml [mcp] port.
+    // The host topology (SYNAPSE_HOSTS_CONFIG / SYNAPSE_CONFIG_FILE / ~/.ssh/config)
+    // is resolved lazily by flux/scout at call time, so there is no startup
+    // credential to validate here.
     checks.push(check_port_available(&config.mcp.host, config.mcp.port));
 
-    // ── 6. Auth configuration ─────────────────────────────────────────────────
+    // ── 4. Auth configuration ─────────────────────────────────────────────────
     //
     // TEMPLATE: The auth check inspects the combination of host / auth settings
     //           and reports which auth mode is active, or warns if 0.0.0.0 has
@@ -136,8 +108,8 @@ pub async fn run_doctor(config: &Config, json: bool) -> Result<()> {
 pub struct DoctorCheck {
     /// Logical category for grouping in human output and JSON filtering.
     ///
-    /// TEMPLATE: Defined by each `check_*` function. Categories in the template:
-    ///   "config" | "credentials" | "connectivity" | "server" | "auth"
+    /// Categories emitted by the `check_*` functions:
+    ///   "config" | "server" | "auth"
     pub category: &'static str,
 
     /// Short human-readable name for the check (shown in the left column).
@@ -182,38 +154,6 @@ impl DoctorCheck {
             value: None,
             hint: Some(hint.into()),
             latency_ms: None,
-        }
-    }
-
-    fn pass_with_latency(
-        category: &'static str,
-        name: impl Into<String>,
-        value: impl Into<String>,
-        latency_ms: u64,
-    ) -> Self {
-        Self {
-            category,
-            name: name.into(),
-            ok: true,
-            value: Some(value.into()),
-            hint: None,
-            latency_ms: Some(latency_ms),
-        }
-    }
-
-    fn fail_with_latency(
-        category: &'static str,
-        name: impl Into<String>,
-        hint: impl Into<String>,
-        latency_ms: u64,
-    ) -> Self {
-        Self {
-            category,
-            name: name.into(),
-            ok: false,
-            value: None,
-            hint: Some(hint.into()),
-            latency_ms: Some(latency_ms),
         }
     }
 }
@@ -304,8 +244,6 @@ fn print_doctor_report(checks: &[DoctorCheck]) {
     // TEMPLATE: Reorder categories or add new ones to match your service.
     let categories: &[(&str, &str)] = &[
         ("config", "Config"),
-        ("credentials", "Service credentials"),
-        ("connectivity", "Connectivity"),
         ("server", "MCP server"),
         ("auth", "Authentication"),
     ];

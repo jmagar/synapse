@@ -6,7 +6,6 @@
 //! `SynapseService` owns:
 //! - `flux: FluxService` — Docker / container / host / compose operations
 //! - `scout: ScoutService` — node discovery, filesystem peek, remote exec
-//! - `client: SynapseClient` — template transport (greet/echo/status)
 //!
 //! Reach domain methods through the accessors: `service.flux().docker_info()`,
 //! `service.scout().nodes()`. If you need caching, retries, data transformation,
@@ -14,7 +13,7 @@
 //! `mcp/tools.rs`.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 use crate::compose::ComposeDiscovery;
@@ -22,7 +21,6 @@ use crate::docker_client::DockerClientCache;
 use crate::flux_service::FluxService;
 use crate::host_config::{FileHostRepository, HostRepository};
 use crate::scout_service::ScoutService;
-use crate::synapse2::SynapseClient;
 
 // Re-export the scaffold contract types so existing callers that import them
 // from `crate::app` (e.g. actions.rs's downcast, app_tests.rs) keep compiling.
@@ -34,31 +32,27 @@ pub use crate::scaffold::{ScaffoldIntent, ScaffoldIntentValidationError};
 mod tests;
 
 /// The service layer — a thin facade wiring together the focused domain
-/// services plus the template transport client.
+/// services (flux + scout) over the shared host-topology repository.
 #[derive(Clone)]
 pub struct SynapseService {
-    client: SynapseClient,
     flux: FluxService,
     scout: ScoutService,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ElicitedNameOutcome<'a> {
-    Accepted(&'a str),
-    NoInput,
-    Declined,
-    Cancelled,
-    Unsupported,
+impl Default for SynapseService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SynapseService {
     /// Create a new `SynapseService` with the production host repository.
     ///
-    /// The `client` parameter signature is unchanged — existing callers compile as-is.
-    pub fn new(client: SynapseClient) -> Self {
+    /// The host repository resolves the real host topology (`SYNAPSE_HOSTS_CONFIG`
+    /// → `SYNAPSE_CONFIG_FILE` → `~/.ssh/config`) shared by both flux and scout.
+    pub fn new() -> Self {
         let host_repo: Arc<dyn HostRepository> = Arc::new(FileHostRepository::default());
         Self {
-            client,
             flux: FluxService::new(Arc::clone(&host_repo)),
             scout: ScoutService::new(host_repo),
         }
@@ -95,57 +89,6 @@ impl SynapseService {
     /// Access the scout domain service (nodes / peek / exec).
     pub fn scout(&self) -> &ScoutService {
         &self.scout
-    }
-
-    /// Return a greeting for `name`, defaulting to "World".
-    pub async fn greet(&self, name: Option<&str>) -> Result<Value> {
-        self.client.greet(name).await
-    }
-
-    /// Echo `message` back unchanged.
-    pub async fn echo(&self, message: &str) -> Result<Value> {
-        self.client.echo(message).await
-    }
-
-    /// Return the server status.
-    pub async fn status(&self) -> Result<Value> {
-        self.client.status().await
-    }
-
-    /// Build the response for the elicited-name demo after the MCP shim collects input.
-    pub fn elicited_name_greeting(&self, outcome: ElicitedNameOutcome<'_>) -> Value {
-        match outcome {
-            ElicitedNameOutcome::Accepted(name) => {
-                let name = name.trim().to_owned();
-                if name.is_empty() {
-                    json!({
-                        "greeting": "Hello, mysterious stranger!",
-                        "note": "You submitted an empty name - that's perfectly fine!",
-                    })
-                } else {
-                    json!({
-                        "greeting": format!("Hello, {name}! Welcome to the synapse2 MCP server."),
-                        "name": name,
-                    })
-                }
-            }
-            ElicitedNameOutcome::NoInput => json!({
-                "greeting": "Hello! (you provided no name - that's okay)",
-            }),
-            ElicitedNameOutcome::Declined => json!({
-                "message": "No problem - you chose not to share your name.",
-                "greeting": "Hello, anonymous user!",
-            }),
-            ElicitedNameOutcome::Cancelled => json!({
-                "message": "Elicitation was cancelled.",
-                "greeting": "Hello there!",
-            }),
-            ElicitedNameOutcome::Unsupported => json!({
-                "message": "Elicitation is not supported by this MCP client.",
-                "hint": "Try a client like Claude.app that supports MCP elicitation (spec 2025-06-18).",
-                "fallback_greeting": "Hello, World! (elicitation unavailable)",
-            }),
-        }
     }
 
     /// Convert elicited scaffold requirements into the handoff contract consumed

@@ -31,15 +31,14 @@
       "sensitive": true
     },
     {
-      "name": "synapse_api_url",
-      "description": "Optional upstream service base URL (SYNAPSE_API_URL). Consumed by the upstream-client facade and the synapse2 doctor health check; the core flux/scout tools drive Docker and SSH hosts directly and do not require this.",
+      "name": "synapse_hosts_config",
+      "description": "Inline host topology as a JSON array, mapped to SYNAPSE_HOSTS_CONFIG. Highest-priority host source: when set it overrides SYNAPSE_CONFIG_FILE and the ~/.ssh/config fallback. Leave empty to load hosts from a config file or ~/.ssh/config.",
       "required": false
     },
     {
-      "name": "synapse_api_key",
-      "description": "Optional API key or bearer token (SYNAPSE_API_KEY) paired with synapse_api_url for the upstream-client facade. Leave empty when only using flux/scout.",
-      "required": false,
-      "sensitive": true
+      "name": "synapse_config_file",
+      "description": "Path to a hosts config file, mapped to SYNAPSE_CONFIG_FILE. Used when synapse_hosts_config is empty; if neither is set, the server falls back to ~/.ssh/config.",
+      "required": false
     }
   ]
 }

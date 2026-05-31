@@ -1,8 +1,7 @@
 //! Individual pre-flight check functions for the doctor command.
 //!
 //! Each `check_*` function is self-contained: it validates one aspect of the
-//! environment and returns a `DoctorCheck`. No side effects other than network
-//! calls in `check_upstream`.
+//! environment and returns a `DoctorCheck`.
 //!
 //! # TEMPLATE
 //! Add new `check_*` functions here, then call them from `run_doctor` in the
@@ -14,7 +13,6 @@ mod tests;
 
 use std::net::TcpListener;
 use std::path::Path;
-use std::time::Instant;
 
 use crate::{
     config::Config,
@@ -136,128 +134,6 @@ pub fn check_binary_in_path(binary: &str) -> DoctorCheck {
              → Then add ~/.local/bin to your PATH."
         ),
     )
-}
-
-// ── Environment variables / credentials ──────────────────────────────────────
-
-/// Check that a required environment variable / config value is non-empty.
-///
-/// `var_name` is the env var name (for display and the hint message).
-/// `value` is the resolved value from the loaded `Config` (which merges env +
-/// config.toml, so a non-empty value here means it is actually configured).
-///
-/// # TEMPLATE
-/// Call this once per required variable. Add entries for every var that must be
-/// set before `synapse2 serve` will work.
-pub fn check_required_var(var_name: &str, value: &str) -> DoctorCheck {
-    if !value.is_empty() {
-        let display = redact(value);
-        DoctorCheck::pass(
-            "credentials",
-            var_name.to_string(),
-            format!("{display} (set)"),
-        )
-    } else {
-        DoctorCheck::fail(
-            "credentials",
-            var_name.to_string(),
-            format!(
-                "Not set.\n    \
-                 → Add to ~/.synapse2/.env:  {var_name}=<your_value>\n    \
-                 → Or export in your shell: export {var_name}=<your_value>\n    \
-                 TEMPLATE: Replace ~/.synapse2/ with your service data dir."
-            ),
-        )
-    }
-}
-
-fn redact(s: &str) -> String {
-    if s.len() <= 4 {
-        return "*".repeat(s.len());
-    }
-    format!("{}****", &s[..4])
-}
-
-// ── Upstream connectivity ─────────────────────────────────────────────────────
-
-/// Check that the upstream service is reachable via HTTP GET.
-///
-/// Attempts `GET <url>/health` with a 5-second timeout. Records round-trip
-/// latency. This check is non-fatal (ok=true on timeout) — a misconfigured
-/// upstream should not block the doctor report entirely.
-///
-/// # TEMPLATE
-/// Replace `/health` with your upstream's actual health endpoint.
-/// If your upstream is not HTTP (e.g. GraphQL, gRPC), adapt this check.
-/// If the upstream requires auth, add the API key header:
-///   `.header("x-api-key", api_key)`
-// L22: A new reqwest::Client is built per invocation. Acceptable here (doctor
-// is a one-shot CLI, not a request handler). Do NOT copy this pattern into
-// hot paths — use a shared Client on AppState instead.
-pub async fn check_upstream(base_url: &str) -> DoctorCheck {
-    // TEMPLATE: Change "/health" to your upstream's actual probe path.
-    let health_url = format!("{}/health", base_url.trim_end_matches('/'));
-
-    // Use strict TLS by default. Set SYNAPSE_DOCTOR_ACCEPT_INVALID_CERTS=true
-    // only for dev environments with self-signed certificates.
-    // TEMPLATE: Replace the env var prefix when adapting this template.
-    let accept_invalid_certs = std::env::var("SYNAPSE_DOCTOR_ACCEPT_INVALID_CERTS")
-        .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
-        .unwrap_or(false);
-    let client = match reqwest::ClientBuilder::new()
-        .timeout(std::time::Duration::from_secs(5))
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return DoctorCheck::fail(
-                "connectivity",
-                "Upstream reachable",
-                format!("Could not build HTTP client: {e}"),
-            );
-        }
-    };
-
-    let start = Instant::now();
-    match client.get(&health_url).send().await {
-        Ok(resp) => {
-            let elapsed = start.elapsed().as_millis() as u64;
-            let status = resp.status();
-            if status.is_success() {
-                DoctorCheck::pass_with_latency(
-                    "connectivity",
-                    "Upstream reachable",
-                    format!("{health_url} → {status} ({elapsed} ms)"),
-                    elapsed,
-                )
-            } else {
-                DoctorCheck::fail_with_latency(
-                    "connectivity",
-                    "Upstream reachable",
-                    format!(
-                        "HTTP {status} from {health_url}\n    \
-                         → Check that the upstream service is healthy.\n    \
-                         TEMPLATE: Verify the correct health endpoint path."
-                    ),
-                    elapsed,
-                )
-            }
-        }
-        Err(e) => {
-            let elapsed = start.elapsed().as_millis() as u64;
-            DoctorCheck::fail_with_latency(
-                "connectivity",
-                "Upstream reachable",
-                format!(
-                    "Could not reach {health_url}: {e}\n    \
-                     → Check SYNAPSE_API_URL is correct and the service is running.\n    \
-                     TEMPLATE: Replace SYNAPSE_API_URL with your service's env var."
-                ),
-                elapsed,
-            )
-        }
-    }
 }
 
 // ── MCP server port ───────────────────────────────────────────────────────────

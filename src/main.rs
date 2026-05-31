@@ -3,14 +3,10 @@
 //! Modes:
 //!   `synapse2 [serve]`        Start MCP HTTP server (default if no args)
 //!   `synapse2 mcp`            Start MCP stdio transport
-//!   `synapse2 greet ...`      CLI greet command
-//!   `synapse2 echo ...`       CLI echo command
-//!   `synapse2 status`         CLI status command
+//!   `synapse2 flux ...`       CLI flux (Docker / container / host / compose) commands
+//!   `synapse2 scout ...`      CLI scout (SSH / filesystem / exec) commands
 //!   `synapse2 --help`         Print usage
 //!   `synapse2 --version`      Print version
-//!
-//! **Template**: add your binary name in Cargo.toml `[[bin]] name = "..."`.
-//! Extend `run_cli` if you add more CLI subcommands.
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -22,7 +18,6 @@ use synapse2::{
     config::Config,
     mcp,
     server::{self, resolve_auth_policy_kind, AppState, AuthPolicy, AuthPolicyKind},
-    synapse2::SynapseClient,
 };
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -119,7 +114,7 @@ async fn serve_mcp() -> Result<()> {
 /// breaks all stdio clients with "forbidden: missing http context".
 async fn serve_stdio_mcp() -> Result<()> {
     let config = Config::load()?;
-    let service = SynapseService::new(SynapseClient::new(&config.synapse2)?);
+    let service = SynapseService::new();
     let state = AppState {
         config: config.mcp,
         auth_policy: AuthPolicy::LoopbackDev, // stdio = trusted local transport
@@ -145,7 +140,7 @@ async fn run_cli() -> Result<()> {
             cli::watch::run_watch(&base, interval).await
         }
         Some(cli::Command::Setup(command)) => cli::run_setup(&config, command).await,
-        Some(cmd) => cli::run(cmd, &config.synapse2).await,
+        Some(cmd) => cli::run(cmd).await,
         None => {
             eprintln!("Unknown command. Run `synapse2 --help` for usage.");
             std::process::exit(1);
@@ -188,7 +183,7 @@ fn enforce_destructive_policy(config: &Config) -> Result<()> {
 
 async fn build_state(config: Config) -> Result<AppState> {
     let auth_policy = build_auth_policy(&config).await?;
-    let service = SynapseService::new(SynapseClient::new(&config.synapse2)?);
+    let service = SynapseService::new();
     Ok(AppState {
         config: config.mcp,
         auth_policy,

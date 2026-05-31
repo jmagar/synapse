@@ -7,56 +7,11 @@
 //! mod tests;
 //! ```
 //!
-//! Tests cover the pure and near-pure check functions. Async network checks
-//! (`check_upstream`) and filesystem-heavy checks are covered with minimal
-//! scaffolding.
+//! Tests cover the pure and near-pure check functions. Filesystem-heavy checks
+//! are covered with minimal scaffolding.
 
 use super::*;
-use crate::config::{McpConfig, SynapseConfig};
-
-// ── check_required_var ────────────────────────────────────────────────────────
-
-#[test]
-fn required_var_passes_when_set() {
-    let check = check_required_var("MY_VAR", "some-value");
-    assert!(check.ok, "non-empty value should pass");
-    assert_eq!(check.category, "credentials");
-    let value = check.value.expect("pass should have a value");
-    assert!(value.contains("(set)"), "pass value should mention (set)");
-    assert!(
-        !value.contains("some-value"),
-        "actual secret must be redacted"
-    );
-}
-
-#[test]
-fn required_var_fails_when_empty() {
-    let check = check_required_var("MY_VAR", "");
-    assert!(!check.ok, "empty value should fail");
-    let hint = check.hint.expect("fail should have a hint");
-    assert!(hint.contains("MY_VAR"), "hint should name the missing var");
-}
-
-#[test]
-fn required_var_redacts_short_secrets() {
-    let check = check_required_var("KEY", "abc");
-    let value = check.value.unwrap();
-    assert!(!value.contains("abc"), "short secret must be fully masked");
-}
-
-#[test]
-fn required_var_redacts_long_secrets() {
-    let check = check_required_var("KEY", "supersecrettoken");
-    let value = check.value.unwrap();
-    assert!(
-        !value.contains("supersecrettoken"),
-        "long secret must not appear in full"
-    );
-    assert!(
-        value.contains("****"),
-        "long secret should show mask suffix"
-    );
-}
+use crate::config::McpConfig;
 
 // ── check_binary_in_path ─────────────────────────────────────────────────────
 
@@ -154,35 +109,8 @@ fn dir_writable_does_not_recurse_into_symlinked_children() {
     );
 }
 
-#[tokio::test]
-async fn upstream_passes_for_local_health_endpoint() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:0").expect("should bind test server");
-    let addr = listener.local_addr().unwrap();
-    let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("should accept one request");
-        let mut buffer = [0_u8; 1024];
-        let _ = stream.read(&mut buffer);
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            .unwrap();
-    });
-
-    let check = check_upstream(&format!("http://{addr}")).await;
-    handle.join().unwrap();
-
-    assert!(check.ok, "local /health response should pass");
-    assert_eq!(check.category, "connectivity");
-}
-
 fn auth_config(host: &str) -> Config {
     Config {
-        synapse2: SynapseConfig {
-            api_url: "https://synapse2.test".into(),
-            api_key: "secret".into(),
-        },
         mcp: McpConfig {
             host: host.into(),
             ..McpConfig::default()

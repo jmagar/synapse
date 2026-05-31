@@ -11,9 +11,8 @@
 //!   [`cache`]       — `Cache` trait and `MemoryCache` implementation (TTL, LRU eviction)
 //!   [`fanout`]      — multi-host fanout helper with `PartialSuccess` aggregation
 //!   [`formatters`]  — `ResponseFormat` enum + per-domain markdown renderers
-//!   [`config`]      — `Config`, `SynapseConfig`, `McpConfig`
+//!   [`config`]      — `Config`, `McpConfig`
 //!   [`host_config`] — `HostRepository` trait + `FileHostRepository` (precedence chain + SSH auto-discovery)
-//!   [`synapse2`]    — `SynapseClient` (transport stub)
 //!   [`mcp`]         — MCP protocol layer (tools, schemas, prompts, server handler)
 //!   [`server`]      — `AppState`, `AuthPolicy`, HTTP router
 //!   [`api`]         — REST API handlers (`POST /v1/synapse2`, health, status)
@@ -40,7 +39,6 @@ pub mod scout_service;
 pub mod server;
 pub mod ssh;
 pub mod synapse;
-pub mod synapse2;
 pub mod token_limit;
 pub mod web;
 
@@ -54,9 +52,8 @@ pub mod testing {
 
     use crate::{
         app::SynapseService,
-        config::{McpConfig, SynapseConfig},
+        config::McpConfig,
         server::{AppState, AuthPolicy},
-        synapse2::SynapseClient,
     };
 
     /// Re-export of the Docker client test double so action-bead integration
@@ -65,12 +62,7 @@ pub mod testing {
     pub use crate::docker_client::MockDockerClient;
 
     fn stub_service() -> SynapseService {
-        let client = SynapseClient::new(&SynapseConfig {
-            api_url: "http://localhost:1/stub".into(),
-            api_key: "test".into(),
-        })
-        .expect("stub client should always build");
-        SynapseService::new(client)
+        SynapseService::new()
     }
 
     /// `AppState` with no auth (loopback trust boundary).

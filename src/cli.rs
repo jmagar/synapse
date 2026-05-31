@@ -2,14 +2,11 @@
 //!
 //! The CLI uses the same service layer as the MCP server. No business logic lives here.
 //!
-//! **Template**: add subcommands to match your service's operations.
-//!
 //! # Usage
 //!
 //! ```text
-//! synapse2 greet --name Alice
-//! synapse2 echo --message "Hello!"
-//! synapse2 status
+//! synapse2 flux container list --host local
+//! synapse2 scout nodes
 //! synapse2 doctor [--json]
 //! ```
 
@@ -19,8 +16,6 @@ use crate::{
         ScoutExecArgs, ScoutFindArgs, ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs,
     },
     app::SynapseService,
-    config::SynapseConfig,
-    synapse2::SynapseClient,
 };
 use anyhow::{anyhow, Result};
 
@@ -97,8 +92,8 @@ pub const USAGE: &str = "Usage:
   synapse2 --version                 Show version
 
 Environment:
-  SYNAPSE_API_URL          Upstream service URL
-  SYNAPSE_API_KEY          Upstream service API key
+  SYNAPSE_HOSTS_CONFIG     Host topology as a JSON array (highest priority)
+  SYNAPSE_CONFIG_FILE      Path to a hosts config file (falls back to ~/.ssh/config)
   SYNAPSE_MCP_HOST         Bind host (default 127.0.0.1)
   SYNAPSE_MCP_PORT         Bind port (default 40080)
   SYNAPSE_MCP_NO_AUTH      Disable auth (loopback only)
@@ -238,13 +233,10 @@ where
 
 /// Run a CLI command, print the result, and exit.
 ///
-/// # TEMPLATE
-/// - `Doctor` is handled specially in `main.rs::run_cli` (needs full `Config`).
-/// - All other commands get only `SynapseConfig`; keep it that way.
-/// - Add `--json` support to each new command by forwarding a `json` flag.
-pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
-    let client = SynapseClient::new(cfg)?;
-    let service = SynapseService::new(client);
+/// `Doctor`, `Watch`, and `Setup` are handled directly in `main.rs::run_cli`
+/// because they need full `Config` fields; everything else flows through here.
+pub async fn run(cmd: Command) -> Result<()> {
+    let service = SynapseService::new();
 
     // The CLI is human-driven: the operator running the command IS the
     // confirmation gate. `CliStderrWarn` prints a single warning line for
