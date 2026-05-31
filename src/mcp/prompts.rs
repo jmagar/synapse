@@ -2,8 +2,6 @@
 //!
 //! Prompts are pre-canned message templates that MCP clients can invoke.
 //! They appear in the "Prompts" section of compatible MCP UIs.
-//!
-//! **Template**: replace `quick_start` with prompts relevant to your domain.
 
 use rmcp::model::{
     GetPromptRequestParams, GetPromptResult, ListPromptsResult, Prompt, PromptMessage,
@@ -15,8 +13,8 @@ pub(super) fn list_prompts() -> ListPromptsResult {
         prompts: vec![Prompt::new(
             "quick_start",
             Some(
-                "Check the server status and get a personalised greeting to verify \
-                 the MCP connection is working end-to-end.",
+                "List the configured hosts and check Docker status to verify the \
+                 MCP connection is working end-to-end.",
             ),
             None,
         )],
@@ -28,11 +26,11 @@ pub(super) fn get_prompt(request: GetPromptRequestParams) -> anyhow::Result<GetP
     match request.name.as_str() {
         "quick_start" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
             PromptMessageRole::User,
-            "Use the synapse2 tool with action=status to check the server is running, \
-             then use action=greet with your name to get a personalised greeting. \
-             Report back both results.",
+            "Use the scout tool with action=nodes to list the configured hosts, \
+             then use the flux tool with action=host to check the Docker host status \
+             on the default host. Report back both results.",
         )])
-        .with_description("Verify the MCP server is working with a status check and greeting")),
+        .with_description("Verify the MCP server is working by listing hosts and checking Docker status")),
         other => Err(anyhow::anyhow!("unknown prompt: {other}")),
     }
 }
