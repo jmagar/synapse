@@ -64,6 +64,19 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
+    if serve_mode || stdio_mode {
+        // Startup sweep: remove stale forwarded sockets from prior runs whose
+        // owning pid is dead (sockets persist on SIGKILL/panic). Must run before
+        // any SSH pool / port-forward initialisation so a leftover
+        // `/tmp/synapse2-*-*.sock` cannot shadow a fresh forward. Server modes
+        // only — a one-shot CLI invocation should not sweep shared `/tmp`.
+        synapse2::ssh::sweep_stale_sockets();
+        // Warn if known_hosts has wildcard patterns that defeat strict host-key
+        // checking (suppressed in stdio mode since logs are warn-level only and
+        // must not pollute the JSON-RPC stream — tracing writes to stderr, OK).
+        synapse2::ssh::warn_on_known_hosts_wildcards();
+    }
+
     if serve_mode {
         serve_mcp().await
     } else if stdio_mode {
@@ -78,6 +91,7 @@ async fn main() -> Result<()> {
 /// Start the MCP HTTP server (Streamable HTTP transport).
 async fn serve_mcp() -> Result<()> {
     let config = Config::load()?;
+    enforce_destructive_policy(&config)?;
     let state = build_state(config).await?;
 
     info!(
@@ -140,6 +154,37 @@ async fn run_cli() -> Result<()> {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Surface the `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` override at startup and refuse to
+/// bind when it is enabled on a non-loopback host.
+///
+/// - Override set: WARN so an accidental prod leak (e.g. from a dev `.env`) is
+///   visible in tracing output.
+/// - Override set AND bound to a non-loopback address: ERROR + refuse to start —
+///   an internet-reachable server that skips destructive confirmation is a
+///   critical misconfiguration.
+fn enforce_destructive_policy(config: &Config) -> Result<()> {
+    if !config.mcp.allow_destructive {
+        return Ok(());
+    }
+    if config.mcp.is_loopback() {
+        tracing::warn!(
+            "SYNAPSE_MCP_ALLOW_DESTRUCTIVE is enabled — destructive operations will run \
+             without confirmation. Verify this is intentional."
+        );
+        Ok(())
+    } else {
+        tracing::error!(
+            bind = %config.mcp.bind_addr(),
+            "CRITICAL: SYNAPSE_MCP_ALLOW_DESTRUCTIVE enabled on a non-loopback bind — refusing \
+             to start. Destructive confirmation must not be disabled on a reachable host."
+        );
+        anyhow::bail!(
+            "SYNAPSE_MCP_ALLOW_DESTRUCTIVE may not be enabled on a non-loopback bind ({})",
+            config.mcp.bind_addr()
+        )
+    }
+}
 
 async fn build_state(config: Config) -> Result<AppState> {
     let auth_policy = build_auth_policy(&config).await?;
@@ -205,4 +250,33 @@ async fn shutdown_signal() {
 
     tokio::select! { _ = ctrl_c => {}, _ = terminate => {} }
     tracing::info!("Shutdown signal received");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(allow_destructive: bool, host: &str) -> Config {
+        let mut config = Config::default();
+        config.mcp.allow_destructive = allow_destructive;
+        config.mcp.host = host.to_string();
+        config
+    }
+
+    #[test]
+    fn override_off_is_ok_even_on_non_loopback() {
+        assert!(enforce_destructive_policy(&cfg(false, "0.0.0.0")).is_ok());
+    }
+
+    #[test]
+    fn override_on_loopback_warns_but_proceeds() {
+        assert!(enforce_destructive_policy(&cfg(true, "127.0.0.1")).is_ok());
+    }
+
+    #[test]
+    fn override_on_non_loopback_refuses_to_bind() {
+        let err = enforce_destructive_policy(&cfg(true, "0.0.0.0"))
+            .expect_err("non-loopback + override must refuse to start");
+        assert!(err.to_string().contains("non-loopback"));
+    }
 }

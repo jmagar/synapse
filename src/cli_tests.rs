@@ -2,19 +2,17 @@ use super::{parse_args_from, Command};
 
 #[test]
 fn parses_flux_and_scout_commands() {
-    assert_eq!(
-        parse_args_from(["flux", "docker", "images"]).unwrap(),
-        Some(Command::FluxDocker {
-            subaction: "images".into()
-        })
-    );
-    assert_eq!(
-        parse_args_from(["flux", "host", "status", "--host", "local"]).unwrap(),
-        Some(Command::FluxHost {
-            subaction: "status".into(),
-            host: Some("local".into()),
-        })
-    );
+    match parse_args_from(["flux", "docker", "images"]).unwrap() {
+        Some(Command::FluxDocker(args)) => assert_eq!(args.subaction, "images"),
+        other => panic!("expected FluxDocker, got {other:?}"),
+    }
+    match parse_args_from(["flux", "host", "status", "--host", "local"]).unwrap() {
+        Some(Command::FluxHost(args)) => {
+            assert_eq!(args.subaction, "status");
+            assert_eq!(args.host.as_deref(), Some("local"));
+        }
+        other => panic!("expected FluxHost, got {other:?}"),
+    }
     assert_eq!(
         parse_args_from(["scout", "nodes"]).unwrap(),
         Some(Command::ScoutNodes)

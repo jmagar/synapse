@@ -39,6 +39,18 @@ A reusable Rust template for building MCP servers with the rmcp crate. The binar
 
 If you find yourself computing, filtering, transforming, or validating data in `tools.rs` or `cli.rs`, stop and move it to `app.rs`.
 
+## NO MONOLITHS — small, focused modules (enforced)
+
+This is a hard rule, enforced by a gate, not a suggestion.
+
+- **Line budget (two-tier):** real-code lines per **production** module (non-comment, non-blank, non-doc; test files `*_tests.rs`/`tests/` exempt), enforced by `scripts/check-rust-module-size.sh` via the lefthook `file_size` hook, `just module-size-check`, and CI.
+  - **Soft 400 — advisory.** Crossing 400 prints a "check cohesion" notice but does **not** fail. It's a prompt to ask "is this module still one focused thing?", not an automatic split mandate. A cohesive 380-line module is fine; a 250-line module doing five unrelated things is not (and no line gate catches that — use judgment).
+  - **Hard 1000 — blocking.** A module over 1000 real-code lines is a monolith and **fails** the build. Split it into focused siblings (`foo.rs` + `foo/` submodules).
+  - Line count is a proxy; the real targets are the **no-god-object** rule below and module cohesion. Don't split a cohesive module just to drop under 400.
+- **When a file approaches the budget, split it** into sibling modules: `foo.rs` + a `foo/` directory of focused submodules. **Never create `mod.rs`** (`xtask` bans it); declare submodules from `foo.rs`. Keep the matching `foo_tests.rs` sibling for each.
+- **No god-objects.** The service layer is **pre-split** into `FluxService` (Docker/container/host/compose) and `ScoutService` (host/SSH/filesystem ops). `SynapseService` is a **thin facade** that holds both (plus template `greet`/`echo`/`status`/`scaffold_intent`) — it must **not** accumulate domain logic or grow a long method list. When adding a `flux` action, put the method on `FluxService`; a `scout` action goes on `ScoutService`. Do not add domain methods directly to `SynapseService`.
+- **Why:** an unsupervised `lavra-work` run built `docker_client.rs` to 510 LOC and a 24-method `SynapseService` before this gate existed. The gate + the pre-split exist to prevent that. If you are a `lavra-work`/parity-port agent, **read this section before writing modules** — a monolithic file will fail CI and the pre-commit hook.
+
 ## How to add an action (4-file checklist)
 
 1. **`src/example.rs`** — add `pub async fn your_action(&self, ...) -> Result<Value>` with the actual HTTP/API call (or stub).
@@ -55,7 +67,11 @@ If you find yourself computing, filtering, transforming, or validating data in `
 
 7. **`tests/tool_dispatch.rs`** — add a test.
 
-8. **`CHANGELOG.md`** — add an entry under `[Unreleased]` describing the new action.
+8. **`src/mcp/help.rs`** — add a help-text entry to the static `HashMap` keyed by `"<domain>:<action>"` (e.g., `"container:list"`, `"zfs:pools"`). For scout simple actions (no subaction), key is just the action name (e.g., `"exec"`, `"nodes"`). Also add the key to `flux_topic_keys()` or `scout_topic_keys()` filter logic if needed.
+
+   **Manual-sync rule**: the help map is NOT auto-generated from `ACTION_SPECS`. Synchronization is enforced by code review at action-add time — there is no meta-test. When your PR adds an action, the reviewer must check that a help entry exists. If you skip step 8, the `help` action will return "unknown topic" for your new action.
+
+9. **`CHANGELOG.md`** — add an entry under `[Unreleased]` describing the new action.
 
 For actions with parameters, extract them with `string_arg(&args, "param_name")` in `tools.rs`.
 

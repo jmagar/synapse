@@ -15,8 +15,8 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
         Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult,
-        PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult,
-        Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
+        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
+        ServerInfo, Tool,
     },
     service::{Peer, RequestContext},
     ErrorData, RoleServer, ServerHandler,
@@ -30,7 +30,7 @@ use crate::{
 
 use crate::server::{AppState, AuthPolicy};
 
-use super::{prompts, schemas::tool_definitions, tools::execute_tool};
+use super::{prompts, resources, schemas::tool_definitions, tools::execute_tool};
 
 // ── server ────────────────────────────────────────────────────────────────────
 
@@ -83,14 +83,32 @@ impl ServerHandler for SynapseRmcpServer {
                 None,
             ));
         }
-        if let Some(action_str) = action_opt.as_deref() {
-            reject_unknown_action_before_scope(action_str)?;
-        }
-        // Only scope-check when a known action is present; dispatch_example will
-        // return the validation error for a missing action below.
-        if let (Some(auth), Some(action_str)) = (auth, action_opt.as_deref()) {
-            if let Some(required_scope) = required_scope_for_action(action_str) {
-                check_scope(auth, required_scope, action_str)?;
+
+        // SECURITY FIX: Before auth succeeds, return generic error for both unknown
+        // actions and missing scopes. This prevents unauthenticated probes from
+        // enumerating valid action names.
+        if let Some(auth_ctx) = auth {
+            // Authenticated: safe to return specific errors
+            if let Some(action_str) = action_opt.as_deref() {
+                reject_unknown_action_before_scope(action_str)?;
+                if let Some(required_scope) = required_scope_for_action(action_str) {
+                    check_scope(auth_ctx, required_scope, action_str)?;
+                }
+            }
+        } else {
+            // Unauthenticated (loopback or trusted gateway): still validate action
+            // but don't leak information before scope check
+            if let Some(action_str) = action_opt.as_deref() {
+                if !is_known_action(action_str) {
+                    return Err(ErrorData::invalid_request("invalid request", None));
+                }
+                if let Some(required_scope) = required_scope_for_action(action_str) {
+                    if required_scope != crate::actions::READ_SCOPE
+                        && required_scope != crate::actions::WRITE_SCOPE
+                    {
+                        return Err(ErrorData::invalid_request("invalid request", None));
+                    }
+                }
             }
         }
 
@@ -116,6 +134,14 @@ impl ServerHandler for SynapseRmcpServer {
                     "MCP tool execution completed"
                 );
                 tool_result_from_json(result)
+            }
+            Err(error) if crate::actions::is_confirmation_denied(&error) => {
+                tracing::warn!(
+                    tool = %tool_name,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "MCP tool destructive op not confirmed"
+                );
+                Err(ErrorData::invalid_request(error.to_string(), None))
             }
             Err(error) if crate::actions::is_validation_error(&error) => {
                 tracing::warn!(
@@ -149,7 +175,7 @@ impl ServerHandler for SynapseRmcpServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
         Ok(ListResourcesResult {
-            resources: vec![schema_resource("flux"), schema_resource("scout")],
+            resources: resources::all_resources(),
             ..Default::default()
         })
     }
@@ -160,20 +186,16 @@ impl ServerHandler for SynapseRmcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
-        if request.uri != FLUX_SCHEMA_RESOURCE_URI && request.uri != SCOUT_SCHEMA_RESOURCE_URI {
-            return Err(ErrorData::invalid_params(
-                format!("unknown resource: {}", request.uri),
-                None,
-            ));
-        }
-        let schema = tool_definitions();
-        let text = serde_json::to_string_pretty(&schema)
-            .map_err(|e| ErrorData::internal_error(format!("serialization error: {e}"), None))?;
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            text,
-            request.uri,
-        )
-        .with_mime_type("application/json")]))
+        let contents = resources::read_resource(&request.uri, &self.state)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("unknown resource") {
+                    ErrorData::invalid_params(e.to_string(), None)
+                } else {
+                    ErrorData::internal_error(format!("resource read failed: {e}"), None)
+                }
+            })?;
+        Ok(ReadResourceResult::new(vec![contents]))
     }
 
     // ── prompts ───────────────────────────────────────────────────────────────
@@ -211,26 +233,6 @@ impl ServerHandler for SynapseRmcpServer {
             env!("CARGO_PKG_VERSION"),
         ))
     }
-}
-
-// ── resource definitions ──────────────────────────────────────────────────────
-
-/// URI for the schema resource. **Template**: change `synapse2` to your service name.
-const FLUX_SCHEMA_RESOURCE_URI: &str = "synapse://schema/flux";
-const SCOUT_SCHEMA_RESOURCE_URI: &str = "synapse://schema/scout";
-
-fn schema_resource(tool: &str) -> Resource {
-    let uri = if tool == "flux" {
-        FLUX_SCHEMA_RESOURCE_URI
-    } else {
-        SCOUT_SCHEMA_RESOURCE_URI
-    };
-    Resource::new(
-        RawResource::new(uri, format!("{tool} tool schema"))
-            .with_description(format!("JSON schema for the synapse2 {tool} MCP tool"))
-            .with_mime_type("application/json"),
-        None,
-    )
 }
 
 // ── tool definition conversion ────────────────────────────────────────────────

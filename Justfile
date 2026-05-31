@@ -128,6 +128,10 @@ ascii-fix:
 file-size-check:
     bash scripts/check-file-size.sh
 
+# NO MONOLITHS: advisory at 400 real-code lines, hard-fail at 1000 (repo-wide)
+module-size-check:
+    bash scripts/check-rust-module-size.sh
+
 # Regenerate MCP schema contract docs from src/mcp/schemas.rs
 schema-docs:
     python3 scripts/check-schema-docs.py --write
@@ -167,6 +171,7 @@ template-features:
 # Run fast template-specific checks
 template-check:
     just patterns-check
+    just module-size-check
     just validate-plugin
     just schema-docs-check
     just openapi-check

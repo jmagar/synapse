@@ -16,7 +16,7 @@ resolver = "2"
 
 [package]
 name = "synapse2"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.90"
 description = "Template for building MCP servers with the rmcp crate"
@@ -29,6 +29,7 @@ path = "src/main.rs"
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+futures = "0.3"
 
 # HTTP / MCP transport
 axum = "0.8"
@@ -68,8 +69,30 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # TEMPLATE: Used in config.rs default_data_dir(). Keep this dep.
 dirs = "6"
 
+# SSH config parser for ~/.ssh/config auto-discovery
+ssh2-config = "0.7"
+
 # Errors
 anyhow = "1"
+
+# SSH transport (scout remote exec + flux forwarded docker socket).
+# native-mux backend: more robust, lower memory than process-mux. Requires the
+# `ssh` binary at runtime; reuses ~/.ssh/config and ~/.ssh/known_hosts.
+openssh = { version = "0.11", default-features = false, features = ["native-mux"] }
+
+# Object-safe async trait (SshExecutor → Box<dyn SshExecutor>; Confirmer gate).
+async-trait = "0.1"
+
+# Concurrent hash map (cache + per-host SSH session pool).
+dashmap = "6"
+
+# Docker Engine API client (flux docker/container/compose ops). Cached per host;
+# remote hosts connect through B1's SSH-forwarded unix socket. bollard's `Docker`
+# is cheap to Clone (Arc-internal), so each cache entry holds it by value.
+bollard = "0.21"
+
+# Stream combinators for bollard logs()/stats() streaming surfaces.
+futures-util = "0.3"
 
 # Static asset embedding (web UI)
 include_dir = { version = "0.7", optional = true }
@@ -81,6 +104,9 @@ test-support = []
 
 [dev-dependencies]
 synapse2 = { path = ".", features = ["test-support"] }
+# Bytes is bollard's payload type for LogOutput frames; needed to construct
+# canned log frames in B8 container_read unit tests.
+bytes = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 rmcp = { version = "1.7.0", default-features = false, features = [

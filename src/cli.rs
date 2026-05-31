@@ -14,13 +14,21 @@
 //! ```
 
 use crate::{
-    actions::rest_help, app::SynapseService, config::SynapseConfig, synapse2::SynapseClient,
+    actions::{
+        rest_help, ContainerArgs, DockerArgs, ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs,
+        ScoutExecArgs, ScoutFindArgs, ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs,
+    },
+    app::SynapseService,
+    config::SynapseConfig,
+    synapse2::SynapseClient,
 };
 use anyhow::{anyhow, Result};
 
 // TEMPLATE: The doctor module is the §48 reference implementation.
 //           Import it from here and wire into run() below.
 pub mod doctor;
+mod flux;
+mod scout;
 pub mod setup;
 pub mod watch;
 
@@ -30,14 +38,54 @@ pub const USAGE: &str = "Usage:
   synapse2 [serve]          Start MCP HTTP server (default)
   synapse2 mcp              Start MCP stdio transport
 
-  synapse2 flux docker info|images|networks|volumes
-  synapse2 flux container list
-  synapse2 flux container inspect --container-id ID
-  synapse2 flux container logs --container-id ID [--lines N]
+  synapse2 flux docker info|df|networks|volumes [--host H]
+  synapse2 flux docker images [--host H] [--dangling-only]
+  synapse2 flux docker pull --host H --image IMG
+  synapse2 flux docker build --host H --context /abs/path --tag TAG [--dockerfile REL] [--no-cache]
+  synapse2 flux docker rmi --host H --image IMG --force
+  synapse2 flux docker prune --host H --target containers|images|volumes|networks|buildcache|all --force
+  synapse2 flux container list [--host H] [--state S] [--name-filter N] [--image-filter I] [--label-filter K=V]
+  synapse2 flux container inspect --container-id ID [--host H] [--summary]
+  synapse2 flux container logs --container-id ID [--host H] [--lines N] [--since T] [--until T] [--grep S] [--stream stdout|stderr|both]
+  synapse2 flux container stats [--container-id ID] [--host H]
+  synapse2 flux container top --container-id ID [--host H]
+  synapse2 flux container search --query Q [--host H]
+    (all flux container subactions also accept [--response-format markdown|json])
   synapse2 flux host status [--host HOST]
+  synapse2 flux host info [--host HOST]
+  synapse2 flux host uptime [--host HOST]
+  synapse2 flux host resources [--host HOST]
+  synapse2 flux host services --host HOST [--state STATE] [--service NAME]
+  synapse2 flux host network [--host HOST]
+  synapse2 flux host mounts --host HOST
+  synapse2 flux host ports --host HOST [--protocol tcp|udp] [--limit N] [--offset N]
+  synapse2 flux host doctor --host HOST [--checks c1,c2,...]
+  synapse2 flux compose list --host HOST
+  synapse2 flux compose status --host HOST --project P [--service SVC]
+  synapse2 flux compose up --host HOST --project P
+  synapse2 flux compose down --host HOST --project P [--remove-volumes --force]
+  synapse2 flux compose restart --host HOST --project P
+  synapse2 flux compose recreate --host HOST --project P
+  synapse2 flux compose logs --host HOST --project P [--lines N] [--since T] [--service SVC]
+  synapse2 flux compose build --host HOST --project P [--service SVC]
+  synapse2 flux compose pull --host HOST --project P [--service SVC]
+  synapse2 flux compose refresh --host HOST
   synapse2 scout nodes
-  synapse2 scout peek --host HOST --path PATH
-  synapse2 scout exec --host HOST --path PATH --command CMD
+  synapse2 scout peek --host HOST --path PATH [--tree] [--depth N]
+  synapse2 scout find --host HOST --path PATH --pattern GLOB [--depth N] [--limit N]
+  synapse2 scout ps --host HOST [--sort cpu|mem|pid|time] [--grep S] [--user U] [--limit N]
+  synapse2 scout df --host HOST [--path PATH]
+  synapse2 scout delta --source-host H --source-path P (--target-host H --target-path P | --content STR)
+  synapse2 scout exec --host HOST --command CMD [--path PATH] [--args A1 A2...]
+  synapse2 scout emit --command CMD --target HOST:PATH[,HOST:PATH...] [--timeout S]
+  synapse2 scout beam --source-host H --source-path P --dest-host H --dest-path P
+  synapse2 scout zfs pools --host HOST [--pool POOL]
+  synapse2 scout zfs datasets --host HOST [--pool POOL] [--type filesystem|volume|snapshot|bookmark|all] [--recursive]
+  synapse2 scout zfs snapshots --host HOST [--pool POOL] [--dataset DS] [--limit N]
+  synapse2 scout logs syslog --host HOST [--lines N] [--grep STR]
+  synapse2 scout logs journal --host HOST [--lines N] [--unit UNIT] [--priority PRIO] [--since T] [--until T] [--grep STR]
+  synapse2 scout logs dmesg --host HOST [--lines N] [--grep STR]
+  synapse2 scout logs auth --host HOST [--lines N] [--grep STR]
   synapse2 help                      Show JSON action reference
   synapse2 doctor [--json]           Run environment pre-flight checks
   synapse2 watch [--url URL] [--interval N]  Poll /health and emit on state change
@@ -63,28 +111,35 @@ pub fn usage() -> &'static str {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
-    FluxDocker {
-        subaction: String,
-    },
-    FluxContainer {
-        subaction: String,
-        container_id: Option<String>,
-        lines: Option<u32>,
-    },
-    FluxHost {
-        subaction: String,
-        host: Option<String>,
-    },
+    /// Docker subactions. Params boxed in [`DockerArgs`] (shared with
+    /// [`crate::actions::SynapseAction`]) so the enum stays small.
+    FluxDocker(Box<DockerArgs>),
+    /// Container read-only subactions. Params are boxed in [`ContainerArgs`]
+    /// (shared with [`crate::actions::SynapseAction`]) so the enum stays small.
+    FluxContainer(Box<ContainerArgs>),
+    FluxHost(Box<crate::actions::HostArgs>),
+    FluxCompose(Box<crate::actions::ComposeArgs>),
     ScoutNodes,
     ScoutPeek {
         host: String,
         path: String,
+        tree: bool,
+        depth: u8,
     },
-    ScoutExec {
+    ScoutFind(Box<ScoutFindArgs>),
+    ScoutPs(Box<ScoutPsArgs>),
+    ScoutDf {
         host: String,
-        path: String,
-        command: String,
+        path: Option<String>,
     },
+    ScoutDelta(Box<ScoutDeltaArgs>),
+    ScoutExec(Box<ScoutExecArgs>),
+    ScoutEmit(Box<ScoutEmitArgs>),
+    ScoutBeam(Box<ScoutBeamArgs>),
+    /// B15: ZFS subactions via CLI.
+    ScoutZfs(Box<ScoutZfsArgs>),
+    /// B15: Log subactions via CLI.
+    ScoutLogs(Box<ScoutLogsArgs>),
     Help,
     /// Pre-flight environment validation (§48).
     ///
@@ -132,8 +187,8 @@ where
     let command = match args.as_slice() {
         [] => None,
         [subcommand, rest @ ..] => match subcommand.as_str() {
-            "flux" => Some(parse_flux(rest)?),
-            "scout" => Some(parse_scout(rest)?),
+            "flux" => Some(flux::parse_flux(rest)?),
+            "scout" => Some(scout::parse_scout(rest)?),
             "help" => {
                 reject_args(rest, "help")?;
                 Some(Command::Help)
@@ -191,52 +246,27 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
     let client = SynapseClient::new(cfg)?;
     let service = SynapseService::new(client);
 
+    // The CLI is human-driven: the operator running the command IS the
+    // confirmation gate. `CliStderrWarn` prints a single warning line for
+    // destructive ops and proceeds (B5 design).
+    let confirmer = crate::elicitation_gate::CliStderrWarn;
+
     let result = match &cmd {
-        Command::FluxDocker { subaction } => match subaction.as_str() {
-            "info" => service.flux_docker_info().await?,
-            "images" => service.flux_docker_images().await?,
-            "networks" => service.flux_docker_networks().await?,
-            "volumes" => service.flux_docker_volumes().await?,
-            other => return Err(anyhow!("unknown flux docker subaction `{other}`")),
-        },
-        Command::FluxContainer {
-            subaction,
-            container_id,
-            lines,
-        } => match subaction.as_str() {
-            "list" => service.flux_container_list().await?,
-            "inspect" => {
-                service
-                    .flux_container_inspect(
-                        container_id
-                            .as_deref()
-                            .ok_or_else(|| anyhow!("container inspect requires --container-id"))?,
-                    )
-                    .await?
-            }
-            "logs" => {
-                service
-                    .flux_container_logs(
-                        container_id
-                            .as_deref()
-                            .ok_or_else(|| anyhow!("container logs requires --container-id"))?,
-                        lines.unwrap_or(50),
-                    )
-                    .await?
-            }
-            other => return Err(anyhow!("unknown flux container subaction `{other}`")),
-        },
-        Command::FluxHost { subaction, host } => match subaction.as_str() {
-            "status" => service.flux_host_status(host.as_deref()).await?,
-            other => return Err(anyhow!("unknown flux host subaction `{other}`")),
-        },
-        Command::ScoutNodes => service.scout_nodes().await?,
-        Command::ScoutPeek { host, path } => service.scout_peek(host, path).await?,
-        Command::ScoutExec {
-            host,
-            path,
-            command,
-        } => service.scout_exec(host, path, command).await?,
+        Command::FluxDocker(args) => flux::run_docker(args, &service, &confirmer).await?,
+        Command::FluxContainer(args) => flux::run_container(args, &service, &confirmer).await?,
+        Command::FluxHost(args) => flux::run_host(args, &service).await?,
+        Command::FluxCompose(args) => flux::run_compose(args, &service, &confirmer).await?,
+        Command::ScoutNodes
+        | Command::ScoutPeek { .. }
+        | Command::ScoutFind(_)
+        | Command::ScoutPs(_)
+        | Command::ScoutDf { .. }
+        | Command::ScoutDelta(_)
+        | Command::ScoutExec(_)
+        | Command::ScoutEmit(_)
+        | Command::ScoutBeam(_)
+        | Command::ScoutZfs(_)
+        | Command::ScoutLogs(_) => scout::run_scout(&cmd, &service, &confirmer).await?,
         Command::Help => rest_help(),
         // Doctor, Watch, and Setup are never dispatched via this function — main.rs
         // handles them directly because they need config.mcp fields.
@@ -259,52 +289,11 @@ fn reject_args(args: &[String], command: &str) -> Result<()> {
     }
 }
 
-fn parse_flux(args: &[String]) -> Result<Command> {
-    match args {
-        [group, subaction] if group == "docker" => Ok(Command::FluxDocker {
-            subaction: subaction.clone(),
-        }),
-        [group, subaction, rest @ ..] if group == "container" => {
-            let container_id = parse_optional_named_value(rest, "--container-id")?;
-            let lines = parse_optional_named_value(rest, "--lines")?
-                .map(|value| value.parse())
-                .transpose()
-                .map_err(|_| anyhow!("--lines must be an integer"))?;
-            Ok(Command::FluxContainer {
-                subaction: subaction.clone(),
-                container_id,
-                lines,
-            })
-        }
-        [group, subaction, rest @ ..] if group == "host" => Ok(Command::FluxHost {
-            subaction: subaction.clone(),
-            host: parse_optional_value_flag(rest, "flux host", "--host")?,
-        }),
-        _ => Err(anyhow!("unknown flux command")),
-    }
-}
-
-fn parse_scout(args: &[String]) -> Result<Command> {
-    match args {
-        [action] if action == "nodes" => Ok(Command::ScoutNodes),
-        [action, rest @ ..] if action == "peek" => Ok(Command::ScoutPeek {
-            host: parse_required_named_value(rest, "--host")?,
-            path: parse_required_named_value(rest, "--path")?,
-        }),
-        [action, rest @ ..] if action == "exec" => Ok(Command::ScoutExec {
-            host: parse_required_named_value(rest, "--host")?,
-            path: parse_required_named_value(rest, "--path")?,
-            command: parse_required_named_value(rest, "--command")?,
-        }),
-        _ => Err(anyhow!("unknown scout command")),
-    }
-}
-
-fn parse_required_named_value(args: &[String], flag: &str) -> Result<String> {
+pub(super) fn parse_required_named_value(args: &[String], flag: &str) -> Result<String> {
     parse_optional_named_value(args, flag)?.ok_or_else(|| anyhow!("missing required {flag}"))
 }
 
-fn parse_optional_named_value(args: &[String], flag: &str) -> Result<Option<String>> {
+pub(super) fn parse_optional_named_value(args: &[String], flag: &str) -> Result<Option<String>> {
     let mut value = None;
     let mut index = 0;
     while index < args.len() {
@@ -342,32 +331,6 @@ fn parse_bool_flag(args: &[String], command: &str, flag: &str) -> Result<bool> {
         }
     }
     Ok(found)
-}
-
-fn parse_optional_value_flag(args: &[String], command: &str, flag: &str) -> Result<Option<String>> {
-    match args {
-        [] => Ok(None),
-        [found_flag, value] if found_flag == flag => {
-            if value.starts_with("--") {
-                Err(anyhow!("{command} requires a value after {flag}"))
-            } else {
-                Ok(Some(value.clone()))
-            }
-        }
-        [found_flag] if found_flag == flag => {
-            Err(anyhow!("{command} requires a value after {flag}"))
-        }
-        [found_flag, value, rest @ ..] if found_flag == flag => {
-            if value.starts_with("--") {
-                Err(anyhow!("{command} requires a value after {flag}"))
-            } else if rest.iter().any(|arg| arg == flag) {
-                Err(anyhow!("{command} received duplicate {flag}"))
-            } else {
-                Err(anyhow!("{command} does not accept argument `{}`", rest[0]))
-            }
-        }
-        [unexpected, ..] => Err(anyhow!("{command} does not accept argument `{unexpected}`")),
-    }
 }
 
 fn parse_watch_flags(args: &[String]) -> Result<(Option<String>, Option<String>)> {
