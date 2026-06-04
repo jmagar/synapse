@@ -21,7 +21,9 @@ use super::Command;
 
 pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
     match args {
-        [action] if action == "nodes" => Ok(Command::ScoutNodes),
+        [action, rest @ ..] if action == "nodes" => Ok(Command::ScoutNodes {
+            response_format: super::parse_output_format_flag(rest, "scout nodes")?,
+        }),
         [action, rest @ ..] if action == "peek" => {
             let tree = rest.iter().any(|a| a == "--tree");
             let value_args: Vec<String> = rest.iter().filter(|a| *a != "--tree").cloned().collect();
@@ -29,6 +31,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
                 .map(|v| v.parse::<u8>().unwrap_or(3).clamp(1, 10))
                 .unwrap_or(3);
             Ok(Command::ScoutPeek {
+                response_format: super::parse_optional_response_format(&value_args)?,
                 host: super::parse_required_named_value(&value_args, "--host")?,
                 path: super::parse_required_named_value(&value_args, "--path")?,
                 tree,
@@ -41,6 +44,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
             let limit = super::parse_optional_named_value(rest, "--limit")?
                 .map(|v| v.parse::<u32>().unwrap_or(500));
             Ok(Command::ScoutFind(Box::new(ScoutFindArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 host: super::parse_required_named_value(rest, "--host")?,
                 path: super::parse_required_named_value(rest, "--path")?,
                 pattern: super::parse_required_named_value(rest, "--pattern")?,
@@ -52,6 +56,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
             let limit = super::parse_optional_named_value(rest, "--limit")?
                 .map(|v| v.parse::<u32>().unwrap_or(50));
             Ok(Command::ScoutPs(Box::new(ScoutPsArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 host: super::parse_required_named_value(rest, "--host")?,
                 sort: super::parse_optional_named_value(rest, "--sort")?,
                 grep: super::parse_optional_named_value(rest, "--grep")?,
@@ -60,11 +65,13 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
             })))
         }
         [action, rest @ ..] if action == "df" => Ok(Command::ScoutDf {
+            response_format: super::parse_optional_response_format(rest)?,
             host: super::parse_required_named_value(rest, "--host")?,
             path: super::parse_optional_named_value(rest, "--path")?,
         }),
         [action, rest @ ..] if action == "delta" => {
             Ok(Command::ScoutDelta(Box::new(ScoutDeltaArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 source_host: super::parse_required_named_value(rest, "--source-host")?,
                 source_path: super::parse_required_named_value(rest, "--source-path")?,
                 target_host: super::parse_optional_named_value(rest, "--target-host")?,
@@ -77,6 +84,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
                 .map(|v| v.parse::<u64>().unwrap_or(30));
             // Collect remaining non-flag args as positional args (simplified).
             Ok(Command::ScoutExec(Box::new(ScoutExecArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 host: super::parse_required_named_value(rest, "--host")?,
                 path: super::parse_optional_named_value(rest, "--path")?,
                 command: super::parse_required_named_value(rest, "--command")?,
@@ -107,6 +115,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
             let timeout_secs = super::parse_optional_named_value(rest, "--timeout")?
                 .map(|v| v.parse::<u64>().unwrap_or(30));
             Ok(Command::ScoutEmit(Box::new(ScoutEmitArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 targets,
                 command: super::parse_required_named_value(rest, "--command")?,
                 args: Vec::new(),
@@ -115,6 +124,7 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
         }
         [action, rest @ ..] if action == "beam" => {
             Ok(Command::ScoutBeam(Box::new(ScoutBeamArgs {
+                response_format: super::parse_optional_response_format(rest)?,
                 source_host: super::parse_required_named_value(rest, "--source-host")?,
                 source_path: super::parse_required_named_value(rest, "--source-path")?,
                 dest_host: super::parse_required_named_value(rest, "--dest-host")?,
@@ -128,38 +138,39 @@ pub(super) fn parse_scout(args: &[String]) -> Result<Command> {
 }
 
 fn parse_scout_zfs(subaction: &str, rest: &[String]) -> Result<Command> {
-    let host = super::parse_required_named_value(rest, "--host")?;
+    let recursive = rest.iter().any(|a| a == "--recursive");
+    let value_args: Vec<String> = rest
+        .iter()
+        .filter(|a| *a != "--recursive")
+        .cloned()
+        .collect();
+    let host = super::parse_required_named_value(&value_args, "--host")?;
     match subaction {
         "pools" => Ok(Command::ScoutZfs(Box::new(ScoutZfsArgs {
+            response_format: super::parse_optional_response_format(&value_args)?,
             host,
             subaction: "pools".to_owned(),
-            pool: super::parse_optional_named_value(rest, "--pool")?,
+            pool: super::parse_optional_named_value(&value_args, "--pool")?,
             ..Default::default()
         }))),
-        "datasets" => {
-            let recursive = rest.iter().any(|a| a == "--recursive");
-            let value_args: Vec<String> = rest
-                .iter()
-                .filter(|a| *a != "--recursive")
-                .cloned()
-                .collect();
-            Ok(Command::ScoutZfs(Box::new(ScoutZfsArgs {
-                host,
-                subaction: "datasets".to_owned(),
-                pool: super::parse_optional_named_value(&value_args, "--pool")?,
-                dataset_type: super::parse_optional_named_value(&value_args, "--type")?,
-                recursive,
-                ..Default::default()
-            })))
-        }
+        "datasets" => Ok(Command::ScoutZfs(Box::new(ScoutZfsArgs {
+            response_format: super::parse_optional_response_format(&value_args)?,
+            host,
+            subaction: "datasets".to_owned(),
+            pool: super::parse_optional_named_value(&value_args, "--pool")?,
+            dataset_type: super::parse_optional_named_value(&value_args, "--type")?,
+            recursive,
+            ..Default::default()
+        }))),
         "snapshots" => {
             let limit = super::parse_optional_named_value(rest, "--limit")?
                 .map(|v| v.parse::<u32>().unwrap_or(0));
             Ok(Command::ScoutZfs(Box::new(ScoutZfsArgs {
+                response_format: super::parse_optional_response_format(&value_args)?,
                 host,
                 subaction: "snapshots".to_owned(),
-                pool: super::parse_optional_named_value(rest, "--pool")?,
-                dataset: super::parse_optional_named_value(rest, "--dataset")?,
+                pool: super::parse_optional_named_value(&value_args, "--pool")?,
+                dataset: super::parse_optional_named_value(&value_args, "--dataset")?,
                 limit,
                 ..Default::default()
             })))
@@ -180,6 +191,7 @@ fn parse_scout_logs(subaction: &str, rest: &[String]) -> Result<Command> {
 
     match subaction {
         "syslog" => Ok(Command::ScoutLogs(Box::new(ScoutLogsArgs {
+            response_format: super::parse_optional_response_format(rest)?,
             host,
             subaction: "syslog".to_owned(),
             lines,
@@ -187,6 +199,7 @@ fn parse_scout_logs(subaction: &str, rest: &[String]) -> Result<Command> {
             ..Default::default()
         }))),
         "journal" => Ok(Command::ScoutLogs(Box::new(ScoutLogsArgs {
+            response_format: super::parse_optional_response_format(rest)?,
             host,
             subaction: "journal".to_owned(),
             lines,
@@ -197,6 +210,7 @@ fn parse_scout_logs(subaction: &str, rest: &[String]) -> Result<Command> {
             until: super::parse_optional_named_value(rest, "--until")?,
         }))),
         "dmesg" => Ok(Command::ScoutLogs(Box::new(ScoutLogsArgs {
+            response_format: super::parse_optional_response_format(rest)?,
             host,
             subaction: "dmesg".to_owned(),
             lines,
@@ -204,6 +218,7 @@ fn parse_scout_logs(subaction: &str, rest: &[String]) -> Result<Command> {
             ..Default::default()
         }))),
         "auth" => Ok(Command::ScoutLogs(Box::new(ScoutLogsArgs {
+            response_format: super::parse_optional_response_format(rest)?,
             host,
             subaction: "auth".to_owned(),
             lines,
@@ -224,12 +239,13 @@ pub(super) async fn run_scout(
     confirmer: &CliStderrWarn,
 ) -> Result<Value> {
     let result = match cmd {
-        Command::ScoutNodes => service.scout().nodes().await?,
+        Command::ScoutNodes { .. } => service.scout().nodes().await?,
         Command::ScoutPeek {
             host,
             path,
             tree,
             depth,
+            ..
         } => service.scout().peek(host, path, *tree, *depth).await?,
         Command::ScoutFind(a) => {
             service
@@ -249,7 +265,7 @@ pub(super) async fn run_scout(
                 )
                 .await?
         }
-        Command::ScoutDf { host, path } => service.scout().df(host, path.as_deref()).await?,
+        Command::ScoutDf { host, path, .. } => service.scout().df(host, path.as_deref()).await?,
         Command::ScoutDelta(a) => {
             service
                 .scout()

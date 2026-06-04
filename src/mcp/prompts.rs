@@ -30,7 +30,9 @@ pub(super) fn get_prompt(request: GetPromptRequestParams) -> anyhow::Result<GetP
              then use the flux tool with action=host to check the Docker host status \
              on the default host. Report back both results.",
         )])
-        .with_description("Verify the MCP server is working by listing hosts and checking Docker status")),
+        .with_description(
+            "Verify the MCP server is working by listing hosts and checking Docker status",
+        )),
         other => Err(anyhow::anyhow!("unknown prompt: {other}")),
     }
 }

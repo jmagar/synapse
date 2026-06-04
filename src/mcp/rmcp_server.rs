@@ -119,6 +119,8 @@ impl ServerHandler for SynapseRmcpServer {
             .map(Value::Object)
             .unwrap_or_else(|| Value::Object(Map::new()));
 
+        validate_response_format_arg(&arguments)?;
+
         // Clone the peer so we can pass it to the tool dispatcher.
         // The peer is needed for elicitation (asking the client for user input).
         let peer: Peer<RoleServer> = context.peer.clone();
@@ -126,6 +128,7 @@ impl ServerHandler for SynapseRmcpServer {
         let started = Instant::now();
         tracing::info!(tool = %tool_name, action = %action, "MCP tool execution started");
 
+        let render_args = arguments.clone();
         match execute_tool(&self.state, &tool_name, arguments, &peer).await {
             Ok(result) => {
                 tracing::info!(
@@ -133,7 +136,9 @@ impl ServerHandler for SynapseRmcpServer {
                     elapsed_ms = started.elapsed().as_millis(),
                     "MCP tool execution completed"
                 );
-                tool_result_from_json(result)
+                let text = render_mcp_tool_output(&tool_name, &render_args, &result)
+                    .map_err(|e| ErrorData::internal_error(format!("render error: {e}"), None))?;
+                tool_result_from_text(text)
             }
             Err(error) if crate::actions::is_confirmation_denied(&error) => {
                 tracing::warn!(
@@ -266,12 +271,41 @@ fn rmcp_tool_from_json(value: Value) -> Result<Tool, ErrorData> {
     ))
 }
 
+#[cfg(test)]
 fn tool_result_from_json(value: Value) -> Result<CallToolResult, ErrorData> {
     // Compact JSON (not pretty) recovers ~30-40% of the 40 KB token budget.
     let text = serde_json::to_string(&value)
         .map_err(|e| ErrorData::internal_error(format!("serialization error: {e}"), None))?;
     let text = token_limit::truncate_if_needed(&text);
     Ok(CallToolResult::success(vec![Content::text(text)]))
+}
+
+fn tool_result_from_text(text: String) -> Result<CallToolResult, ErrorData> {
+    let text = token_limit::truncate_if_needed(&text);
+    Ok(CallToolResult::success(vec![Content::text(text)]))
+}
+
+fn render_mcp_tool_output(tool_name: &str, args: &Value, value: &Value) -> Result<String, String> {
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let subaction = args.get("subaction").and_then(Value::as_str);
+    let response_format = if action == "help" {
+        args.get("format").and_then(Value::as_str)
+    } else {
+        args.get("response_format").and_then(Value::as_str)
+    };
+    crate::formatters::render_action_output(tool_name, action, subaction, response_format, value)
+}
+
+fn validate_response_format_arg(args: &Value) -> Result<(), ErrorData> {
+    let Some(value) = args.get("response_format").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    crate::formatters::ResponseFormat::parse(Some(value))
+        .map(|_| ())
+        .map_err(|e| ErrorData::invalid_params(e, None))
 }
 
 fn reject_unknown_action_before_scope(action: &str) -> Result<(), ErrorData> {

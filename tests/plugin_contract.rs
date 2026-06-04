@@ -21,7 +21,7 @@ fn plugin_manifests_exist_for_all_supported_hosts() {
         "plugins/synapse2/.claude-plugin/plugin.json",
         "plugins/synapse2/.codex-plugin/plugin.json",
         "plugins/synapse2/gemini-extension.json",
-        "plugins/synapse2/.mcp.json",
+        "plugins/synapse2/mcp.json",
         "plugins/synapse2/hooks/hooks.json",
         "plugins/synapse2/hooks/plugin-setup.sh",
         "plugins/synapse2/skills/synapse2/SKILL.md",
@@ -35,7 +35,7 @@ fn plugin_manifests_share_identity_and_connection_settings() {
     let claude = json("plugins/synapse2/.claude-plugin/plugin.json");
     let codex = json("plugins/synapse2/.codex-plugin/plugin.json");
     let gemini = json("plugins/synapse2/gemini-extension.json");
-    let mcp = json("plugins/synapse2/.mcp.json");
+    let mcp = json("plugins/synapse2/mcp.json");
 
     assert_eq!(claude["name"], "synapse2");
     assert_eq!(codex["name"], "synapse2");
@@ -136,8 +136,10 @@ fn plugin_hook_standard_is_documented() {
     }
 }
 
-fn synapse2_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_synapse2")
+fn synapse2_bin() -> String {
+    std::env::var("CARGO_BIN_EXE_synapse")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_synapse2"))
+        .unwrap_or_else(|_| "target/debug/synapse".to_string())
 }
 
 fn setup_command(data_dir: &std::path::Path) -> Command {

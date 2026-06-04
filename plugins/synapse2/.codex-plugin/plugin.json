@@ -13,7 +13,6 @@
     "mcp"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Synapse2 MCP",
     "shortDescription": "Manage Docker and SSH hosts via flux and scout",

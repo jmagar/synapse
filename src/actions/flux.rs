@@ -24,6 +24,7 @@ use super::{
 /// `FluxService`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ContainerArgs {
+    pub response_format: Option<String>,
     pub subaction: String,
     pub container_id: Option<String>,
     pub host: Option<String>,
@@ -64,6 +65,7 @@ pub struct ContainerArgs {
 /// submodule.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DockerArgs {
+    pub response_format: Option<String>,
     pub subaction: String,
     pub host: Option<String>,
     // images
@@ -82,6 +84,7 @@ pub struct DockerArgs {
 /// Parsed parameters for `flux host` subactions (B11).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HostArgs {
+    pub response_format: Option<String>,
     pub subaction: String,
     /// Target host name (None = fan out to all hosts).
     pub host: Option<String>,
@@ -102,6 +105,7 @@ pub struct HostArgs {
 /// small. Extraction lives in the shim; all logic lives in `FluxService`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ComposeArgs {
+    pub response_format: Option<String>,
     /// Subaction: list|status|up|down|restart|recreate|logs|build|pull|refresh.
     pub subaction: String,
     /// Target host name. Required for all subactions except `list` (where it
@@ -135,6 +139,7 @@ impl super::SynapseAction {
                 format: optional_string_param(args, "format")?,
             }),
             "docker" => Ok(Self::FluxDocker(Box::new(DockerArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 subaction: required_string_param(args, "subaction")?,
                 host: optional_string_param(args, "host")?,
                 dangling_only: optional_bool_param(args, "dangling_only")?,
@@ -155,6 +160,7 @@ impl super::SynapseAction {
                         .map_err(|e| anyhow::anyhow!(e))?;
                 }
                 Ok(Self::FluxContainer(Box::new(ContainerArgs {
+                    response_format: optional_string_param(args, "response_format")?,
                     subaction: required_string_param(args, "subaction")?,
                     container_id: optional_string_param(args, "container_id")?,
                     host: optional_string_param(args, "host")?,
@@ -178,6 +184,7 @@ impl super::SynapseAction {
                 })))
             }
             "host" => Ok(Self::FluxHost(Box::new(HostArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 subaction: required_string_param(args, "subaction")?,
                 host: optional_string_param(args, "host")?,
                 state: optional_string_param(args, "state")?,
@@ -188,6 +195,7 @@ impl super::SynapseAction {
                 checks: optional_string_param(args, "checks")?,
             }))),
             "compose" => Ok(Self::FluxCompose(Box::new(ComposeArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 subaction: required_string_param(args, "subaction")?,
                 host: optional_string_param(args, "host")?,
                 project: optional_string_param(args, "project")?,

@@ -34,6 +34,10 @@ use crate::formatters::{format_bytes, str_field, truncate};
 /// - Storage: overlay2
 /// ```
 pub fn render_docker_info_markdown(data: &Value) -> String {
+    if let Some(entries) = data.get("info").and_then(|v| v.as_array()) {
+        return render_flattened_docker_info(entries, data);
+    }
+
     let available = data
         .get("available")
         .and_then(|v| v.as_bool())
@@ -90,6 +94,66 @@ pub fn render_docker_info_markdown(data: &Value) -> String {
     ));
     lines.push(format!("- Images: {images}"));
 
+    lines.join("\n")
+}
+
+fn render_flattened_docker_info(entries: &[Value], data: &Value) -> String {
+    let mut lines = vec!["Docker System Info".to_owned(), String::new()];
+
+    if entries.is_empty() {
+        lines.push("✗ Docker unavailable".to_owned());
+        return lines.join("\n");
+    }
+
+    for entry in entries {
+        let host = entry
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let info = entry.get("info").unwrap_or(entry);
+        let docker_version = str_field(info, "ServerVersion");
+        let os_type = str_field(info, "OSType");
+        let arch = str_field(info, "Architecture");
+        let kernel = str_field(info, "KernelVersion");
+        let cpus = info.get("NCPU").and_then(|v| v.as_u64()).unwrap_or(0);
+        let mem_bytes = info.get("MemTotal").and_then(|v| v.as_u64()).unwrap_or(0);
+        let storage_driver = str_field(info, "Driver");
+        let containers_running = info
+            .get("ContainersRunning")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let containers_total = info.get("Containers").and_then(|v| v.as_u64()).unwrap_or(0);
+        let images = info.get("Images").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        lines.push(host.to_string());
+        lines.push(format!("- Docker: {docker_version}"));
+        lines.push(format!("- OS: {os_type} ({arch})"));
+        lines.push(format!("- Kernel: {kernel}"));
+        lines.push(format!(
+            "- CPUs: {cpus} | Memory: {}",
+            format_bytes(mem_bytes)
+        ));
+        lines.push(format!("- Storage: {storage_driver}"));
+        lines.push(format!(
+            "- Containers: {containers_running} running / {containers_total} total"
+        ));
+        lines.push(format!("- Images: {images}"));
+        lines.push(String::new());
+    }
+
+    if let Some(errors) = data.get("errors").and_then(|v| v.as_object()) {
+        if !errors.is_empty() {
+            lines.push("Errors".to_owned());
+            for (host, error) in errors {
+                let error = error.as_str().unwrap_or("Docker unavailable");
+                lines.push(format!("- {host}: {error}"));
+            }
+        }
+    }
+
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
     lines.join("\n")
 }
 

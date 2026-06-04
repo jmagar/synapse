@@ -24,14 +24,14 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    cli::install_color_from_args(&mut args)?;
 
     // Handle meta-flags before initialising logging (they print and exit)
+    if cli::maybe_handle_help(&args) {
+        return Ok(());
+    }
     match args.as_slice() {
-        [f] if matches!(f.as_str(), "--help" | "-h") => {
-            eprintln!("{}", cli::usage());
-            return Ok(());
-        }
         [f] if matches!(f.as_str(), "--version" | "-V" | "version") => {
             println!("synapse2 {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
     } else if stdio_mode {
         serve_stdio_mcp().await
     } else {
-        run_cli().await
+        run_cli(args).await
     }
 }
 
@@ -126,9 +126,9 @@ async fn serve_stdio_mcp() -> Result<()> {
 }
 
 /// Dispatch CLI subcommands.
-async fn run_cli() -> Result<()> {
+async fn run_cli(args: Vec<String>) -> Result<()> {
     let config = Config::load()?;
-    match cli::parse_args()? {
+    match cli::parse_args_from(args)? {
         Some(cli::Command::Doctor { json }) => {
             // Doctor needs the full Config (not just SynapseConfig) to check
             // MCP port, auth mode, etc. — intercept here before service construction.
@@ -143,6 +143,7 @@ async fn run_cli() -> Result<()> {
         Some(cmd) => cli::run(cmd).await,
         None => {
             eprintln!("Unknown command. Run `synapse2 --help` for usage.");
+            cli::print_top_level_help_stderr();
             std::process::exit(1);
         }
     }

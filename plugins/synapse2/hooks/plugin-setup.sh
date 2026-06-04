@@ -23,8 +23,8 @@ export_if_set() {
   export "${env_name}=${value}"
 }
 
-ensure_example_binary() {
-  if command -v synapse >/dev/null 2>&1; then
+ensure_synapse2_binary() {
+  if command -v synapse2 >/dev/null 2>&1; then
     return 0
   fi
 
@@ -36,10 +36,10 @@ ensure_example_binary() {
   fi
 
   mkdir -p "${HOME}/.local/bin"
-  ln -sf "${bundled}" "${HOME}/.local/bin/synapse"
+  ln -sf "${bundled}" "${HOME}/.local/bin/synapse2"
   export PATH="${HOME}/.local/bin:${PATH}"
 
-  command -v synapse >/dev/null 2>&1 || {
+  command -v synapse2 >/dev/null 2>&1 || {
     printf 'synapse2 plugin setup: symlink created but synapse2 still not found in PATH\n' >&2
     printf '  → ensure %s is on your PATH\n' "${HOME}/.local/bin" >&2
     exit 1
@@ -63,8 +63,8 @@ main() {
   chmod 700 "${SYNAPSE_HOME}" 2>/dev/null || true
   export SYNAPSE_HOME
 
-  ensure_example_binary
-  synapse setup plugin-hook "$@"
+  ensure_synapse2_binary
+  synapse2 setup plugin-hook "$@"
 }
 
 main "$@"

@@ -27,7 +27,7 @@
 # =============================================================================
 set -e
 
-SERVICE_NAME="example"
+SERVICE_NAME="synapse"
 BINARY="/usr/local/bin/${SERVICE_NAME}"
 
 # ── Data directory ─────────────────────────────────────────────────────────────

@@ -69,6 +69,9 @@ Thumbs.db
 
 # ── Documentation (not needed in image) ──────────────────────────────────────
 docs/
+!docs/
+!docs/generated/
+!docs/generated/openapi.json
 README.md
 LICENSE*
 AGENTS.md
@@ -105,5 +108,11 @@ config.local.toml
 
 # ── Frontend apps (exclude build artifacts / node_modules, keep only out/) ────
 apps/
+!apps/
+!apps/web/
+!apps/web/**
 !apps/gateway-admin/out
 !apps/gateway-admin/out/**
+apps/web/.next/
+apps/web/out/
+apps/web/node_modules/

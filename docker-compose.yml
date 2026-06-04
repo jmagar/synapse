@@ -10,15 +10,14 @@
 #   docker compose down            # stop and remove containers
 # =============================================================================
 
-name: rmcp-template
+name: synapse2
 
 services:
-  # TEMPLATE: Replace "example-mcp" with your service name throughout this file.
-  example-mcp:
+  synapse2:
     extends:
       file: docker-compose.prod.yml
-      service: example-mcp
-    image: rmcp-template:dev
+      service: synapse2
+    image: synapse2:dev
     pull_policy: build
     build:
       context: .

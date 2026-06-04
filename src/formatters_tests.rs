@@ -405,6 +405,41 @@ fn docker_info_basic() {
     assert!(output.contains("Images: 12"));
 }
 
+#[test]
+fn docker_info_flattened_host_result_renders_available_hosts() {
+    let data = json!({
+        "count": 1,
+        "partial": false,
+        "info": [{
+            "host": "local",
+            "info": {
+                "ServerVersion": "29.5.0",
+                "OSType": "linux",
+                "Architecture": "x86_64",
+                "KernelVersion": "7.0.0-22-generic",
+                "NCPU": 20,
+                "MemTotal": 51540701184_u64,
+                "Driver": "overlayfs",
+                "ContainersRunning": 21,
+                "Containers": 21,
+                "Images": 22
+            }
+        }]
+    });
+
+    let output = render_docker_info_markdown(&data);
+
+    assert!(output.starts_with("Docker System Info"));
+    assert!(output.contains("local"));
+    assert!(output.contains("29.5.0"));
+    assert!(output.contains("overlayfs"));
+    assert!(output.contains("21 running / 21 total"));
+    assert!(
+        !output.contains("Docker unavailable"),
+        "available host info must not render as unavailable"
+    );
+}
+
 // ──────────────────────────────────────────────
 // Docker images
 // ──────────────────────────────────────────────

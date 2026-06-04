@@ -93,6 +93,36 @@ fn tool_result_from_json_applies_response_cap() {
     assert!(text.contains("[TRUNCATED"));
 }
 
+#[test]
+fn mcp_tool_output_defaults_to_markdown_text() {
+    let rendered = super::render_mcp_tool_output(
+        "flux",
+        &json!({"action": "docker", "subaction": "info"}),
+        &json!({"info": {"host": "local"}}),
+    )
+    .unwrap();
+    assert!(
+        !rendered.trim_start().starts_with('{'),
+        "default MCP tool content should not be serialized JSON"
+    );
+}
+
+#[test]
+fn mcp_tool_output_json_requires_response_format_json() {
+    let rendered = super::render_mcp_tool_output(
+        "flux",
+        &json!({
+            "action": "docker",
+            "subaction": "info",
+            "response_format": "json"
+        }),
+        &json!({"info": {"host": "local"}}),
+    )
+    .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+    assert_eq!(parsed["info"]["host"], "local");
+}
+
 // SECURITY FIX: Unauthenticated scope-check error leak tests
 //
 // These tests verify that unauthenticated MCP requests return a generic error

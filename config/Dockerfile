@@ -55,10 +55,10 @@ RUN sed -i 's/, \"xtask\"//g; s/\"xtask\", //g; s/\"xtask\"//g' Cargo.toml
 
 # TEMPLATE: Replace "example" cache IDs with your service name to avoid
 #           sharing cache with other projects on the same build host.
-RUN --mount=type=cache,id=example-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=example-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=example-cargo-target,target=/app/target,sharing=locked \
-    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked -p rmcp-template && rm -rf src
+RUN --mount=type=cache,id=synapse2-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=synapse2-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=synapse2-cargo-target,target=/app/target,sharing=locked \
+    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked -p synapse2 && rm -rf src
 
 # ── Application build ─────────────────────────────────────────────────────────
 # Now copy the real source and build the actual binary.
@@ -68,11 +68,11 @@ COPY src/ src/
 COPY docs/generated/openapi.json docs/generated/openapi.json
 # Embed the Next.js static export built in the web stage.
 COPY --from=web /app/apps/web/out/ apps/web/out/
-RUN --mount=type=cache,id=example-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=example-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=example-cargo-target,target=/app/target,sharing=locked \
-    touch src/main.rs && cargo build --release --locked -p rmcp-template && \
-    cp target/release/example /usr/local/bin/example
+RUN --mount=type=cache,id=synapse2-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=synapse2-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=synapse2-cargo-target,target=/app/target,sharing=locked \
+    touch src/main.rs && cargo build --release --locked -p synapse2 && \
+    cp target/release/synapse /usr/local/bin/synapse
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Minimal Debian image — no Rust toolchain, no build tools.
@@ -95,7 +95,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # TEMPLATE: Replace "example" with your binary name in both COPY and target path.
-COPY --from=builder /usr/local/bin/example /usr/local/bin/example
+COPY --from=builder /usr/local/bin/synapse /usr/local/bin/synapse
 
 # Wire in the entrypoint.
 # TEMPLATE: entrypoint.sh lives at the repo root. It runs as root, fixes /data
@@ -106,10 +106,10 @@ RUN chmod +x /entrypoint.sh
 # Create a non-root user and group for the service.
 # UID/GID 1000 matches the host user convention in docker-compose.yml.
 # TEMPLATE: Replace "example" with your service name for the user/group.
-RUN groupadd --gid 1000 example && \
-    useradd --uid 1000 --gid example --no-create-home --shell /sbin/nologin example && \
+RUN groupadd --gid 1000 synapse && \
+    useradd --uid 1000 --gid synapse --no-create-home --shell /sbin/nologin synapse && \
     mkdir -p /data && \
-    chown example:example /data
+    chown synapse:synapse /data
 
 # Default log level. Override with RUST_LOG env var in docker-compose or at runtime.
 ENV RUST_LOG=info
@@ -132,7 +132,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # MCP registry label — used by Claude Code plugin discovery.
 # TEMPLATE: Replace with your registry path: "tv.tootie/yourservice-mcp"
-LABEL io.modelcontextprotocol.server.name="tv.tootie/example-mcp"
+LABEL io.modelcontextprotocol.server.name="tv.tootie/synapse2"
 
 # Entrypoint handles permission setup and privilege drop.
 # CMD is the default argument passed to entrypoint.sh.

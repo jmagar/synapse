@@ -139,7 +139,8 @@ fn build_tool_definitions() -> Vec<Value> {
                     "unit": { "type": "string", "description": "logs journal: systemd unit filter (-u)." },
                     "priority": { "type": "string", "description": "logs journal: priority filter (-p). e.g. err, warning, info, debug." },
                     "since": { "type": "string", "description": "logs journal: start time (--since). e.g. '2026-05-29 00:00:00' or '-1h'." },
-                    "until": { "type": "string", "description": "logs journal: end time (--until)." }
+                    "until": { "type": "string", "description": "logs journal: end time (--until)." },
+                    "response_format": { "type": "string", "enum": ["markdown", "json"], "description": "Output format (default markdown)." }
                 },
                 "required": ["action"],
                 "additionalProperties": false

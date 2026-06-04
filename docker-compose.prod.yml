@@ -12,7 +12,7 @@
 #   EXAMPLE_*              -> your env var prefix
 # =============================================================================
 
-name: rmcp-template
+name: synapse2
 
 x-common-service: &common-service
   networks:
@@ -32,21 +32,21 @@ x-common-service: &common-service
       compress: "true"
 
 services:
-  example-mcp:
+  synapse2:
     <<: *common-service
-    # TEMPLATE: Replace with your image path.
-    image: ghcr.io/your-org/example-mcp:${EXAMPLE_MCP_VERSION:-latest}
-    container_name: example-mcp
+    image: synapse2:${SYNAPSE2_VERSION:-latest}
+    container_name: synapse2
     env_file:
       - path: .env
         required: false
     environment:
-      EXAMPLE_MCP_HOST: 0.0.0.0
-      EXAMPLE_NOAUTH: "true"
+      SYNAPSE_MCP_HOST: 0.0.0.0
+      SYNAPSE_NOAUTH: "true"
+      SYNAPSE_MCP_PORT: "40080"
     ports:
-      - "${EXAMPLE_MCP_HOST_PORT:-40080}:40080/tcp"
+      - "${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:
-      - ${HOME}/.example:/data
+      - ${HOME}/.synapse2:/data
     cap_drop:
       - ALL
     security_opt:
@@ -68,7 +68,7 @@ services:
           cpus: '0.5'
 
 volumes:
-  example-mcp-data:
+  synapse2-data:
 
 networks:
   mcp:

@@ -41,6 +41,7 @@ fn parse_flux_docker(subaction: &str, rest: &[String]) -> Result<Command> {
         .cloned()
         .collect();
     Ok(Command::FluxDocker(Box::new(DockerArgs {
+        response_format: super::parse_optional_response_format(&value_args)?,
         subaction: subaction.to_owned(),
         host: super::parse_optional_named_value(&value_args, "--host")?,
         dangling_only: dangling_only.then_some(true),
@@ -78,10 +79,9 @@ fn parse_flux_container(subaction: &str, rest: &[String]) -> Result<Command> {
     // `--command` collects everything after `--command` as argv tokens.
     let command = parse_command_argv(&value_args);
     // Validate `--response-format` for MCP/CLI parity.
-    if let Some(rf) = super::parse_optional_named_value(&value_args, "--response-format")? {
-        crate::formatters::ResponseFormat::parse(Some(&rf)).map_err(|e| anyhow!(e))?;
-    }
+    let response_format = super::parse_optional_response_format(&value_args)?;
     Ok(Command::FluxContainer(Box::new(ContainerArgs {
+        response_format,
         subaction: subaction.to_owned(),
         container_id,
         host: super::parse_optional_named_value(&value_args, "--host")?,
@@ -121,6 +121,7 @@ fn parse_command_argv(args: &[String]) -> Vec<String> {
 
 fn parse_flux_host(subaction: &str, rest: &[String]) -> Result<Command> {
     Ok(Command::FluxHost(Box::new(HostArgs {
+        response_format: super::parse_optional_response_format(rest)?,
         subaction: subaction.to_owned(),
         host: super::parse_optional_named_value(rest, "--host")?,
         state: super::parse_optional_named_value(rest, "--state")?,
@@ -154,6 +155,7 @@ fn parse_flux_compose(subaction: &str, rest: &[String]) -> Result<Command> {
         .transpose()
         .map_err(|_| anyhow!("--lines must be an integer"))?;
     Ok(Command::FluxCompose(Box::new(ComposeArgs {
+        response_format: super::parse_optional_response_format(&value_args)?,
         subaction: subaction.to_owned(),
         host: super::parse_optional_named_value(&value_args, "--host")?,
         project: super::parse_optional_named_value(&value_args, "--project")?,
@@ -173,6 +175,7 @@ pub(super) async fn run_docker(
     confirmer: &CliStderrWarn,
 ) -> Result<Value> {
     let DockerArgs {
+        response_format: _,
         subaction,
         host,
         dangling_only,
@@ -259,6 +262,7 @@ pub(super) async fn run_container(
     };
     use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
     let ContainerArgs {
+        response_format: _,
         subaction,
         container_id,
         host,

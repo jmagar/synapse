@@ -1,6 +1,6 @@
 ---
 name: synapse2
-description: Use when the user wants to inspect Docker infrastructure, manage containers or Compose stacks, read remote files and processes, or run guarded SSH commands through synapse2.
+description: Use when the user wants to inspect Docker infrastructure, manage containers or Compose stacks, read remote files and processes, run guarded SSH commands through synapse2, check ZFS pool health, list ZFS datasets, or manage ZFS snapshots.
 ---
 
 # synapse2

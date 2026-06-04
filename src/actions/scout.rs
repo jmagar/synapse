@@ -18,6 +18,7 @@ use super::{
 /// Parsed parameters for `scout find` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutFindArgs {
+    pub response_format: Option<String>,
     pub host: String,
     pub path: String,
     pub pattern: String,
@@ -28,6 +29,7 @@ pub struct ScoutFindArgs {
 /// Parsed parameters for `scout ps` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutPsArgs {
+    pub response_format: Option<String>,
     pub host: String,
     pub sort: Option<String>,
     pub grep: Option<String>,
@@ -38,6 +40,7 @@ pub struct ScoutPsArgs {
 /// Parsed parameters for `scout delta` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutDeltaArgs {
+    pub response_format: Option<String>,
     /// Source `{host, path}`.
     pub source_host: String,
     pub source_path: String,
@@ -51,6 +54,7 @@ pub struct ScoutDeltaArgs {
 /// Parsed parameters for `scout exec` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutExecArgs {
+    pub response_format: Option<String>,
     pub host: String,
     /// Optional working directory (local only; ignored for SSH).
     pub path: Option<String>,
@@ -70,6 +74,7 @@ pub struct ScoutEmitTarget {
 /// Parsed parameters for `scout emit` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutEmitArgs {
+    pub response_format: Option<String>,
     pub targets: Vec<ScoutEmitTarget>,
     pub command: String,
     pub args: Vec<String>,
@@ -79,6 +84,7 @@ pub struct ScoutEmitArgs {
 /// Parsed parameters for `scout beam` (B14).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutBeamArgs {
+    pub response_format: Option<String>,
     pub source_host: String,
     pub source_path: String,
     pub dest_host: String,
@@ -88,6 +94,7 @@ pub struct ScoutBeamArgs {
 /// Parsed parameters for `scout zfs` subactions (B15).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutZfsArgs {
+    pub response_format: Option<String>,
     pub host: String,
     pub subaction: String,
     // pools: optional pool name filter
@@ -105,6 +112,7 @@ pub struct ScoutZfsArgs {
 /// Parsed parameters for `scout logs` subactions (B15).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScoutLogsArgs {
+    pub response_format: Option<String>,
     pub host: String,
     pub subaction: String,
     /// Line count (1–500, default 100).
@@ -143,6 +151,7 @@ impl super::SynapseAction {
                     .unwrap_or(3),
             }),
             "find" => Ok(Self::ScoutFind(Box::new(ScoutFindArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 host: required_string_param(args, "host")?,
                 path: required_string_param(args, "path")?,
                 pattern: required_string_param(args, "pattern")?,
@@ -150,6 +159,7 @@ impl super::SynapseAction {
                 limit: optional_u32_param(args, "limit")?,
             }))),
             "ps" => Ok(Self::ScoutPs(Box::new(ScoutPsArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 host: required_string_param(args, "host")?,
                 sort: optional_string_param(args, "sort")?,
                 grep: optional_string_param(args, "grep")?,
@@ -161,6 +171,7 @@ impl super::SynapseAction {
                 path: optional_string_param(args, "path")?,
             }),
             "delta" => Ok(Self::ScoutDelta(Box::new(ScoutDeltaArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 source_host: required_string_param(args, "source_host")?,
                 source_path: required_string_param(args, "source_path")?,
                 target_host: optional_string_param(args, "target_host")?,
@@ -168,6 +179,7 @@ impl super::SynapseAction {
                 content: optional_string_param(args, "content")?,
             }))),
             "exec" => Ok(Self::ScoutExec(Box::new(ScoutExecArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 host: required_string_param(args, "host")?,
                 path: optional_string_param(args, "path")?,
                 command: required_string_param(args, "command")?,
@@ -197,6 +209,7 @@ impl super::SynapseAction {
                     })
                     .collect();
                 Ok(Self::ScoutEmit(Box::new(ScoutEmitArgs {
+                    response_format: optional_string_param(args, "response_format")?,
                     targets: targets?,
                     command: required_string_param(args, "command")?,
                     args: optional_string_array_param(args, "args")?,
@@ -204,12 +217,14 @@ impl super::SynapseAction {
                 })))
             }
             "beam" => Ok(Self::ScoutBeam(Box::new(ScoutBeamArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 source_host: required_string_param(args, "source_host")?,
                 source_path: required_string_param(args, "source_path")?,
                 dest_host: required_string_param(args, "dest_host")?,
                 dest_path: required_string_param(args, "dest_path")?,
             }))),
             "zfs" => Ok(Self::ScoutZfs(Box::new(ScoutZfsArgs {
+                response_format: optional_string_param(args, "response_format")?,
                 host: required_string_param(args, "host")?,
                 subaction: required_string_param(args, "subaction")?,
                 pool: optional_string_param(args, "pool")?,
@@ -223,6 +238,7 @@ impl super::SynapseAction {
                     .unwrap_or(crate::scout_service::logs::DEFAULT_LINES)
                     .clamp(1, crate::scout_service::logs::MAX_LINES);
                 Ok(Self::ScoutLogs(Box::new(ScoutLogsArgs {
+                    response_format: optional_string_param(args, "response_format")?,
                     host: required_string_param(args, "host")?,
                     subaction: required_string_param(args, "subaction")?,
                     lines,

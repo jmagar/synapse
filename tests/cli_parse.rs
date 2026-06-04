@@ -117,12 +117,15 @@ fn container_search_query_parses() {
 fn scout_commands_parse() {
     assert_eq!(
         parse_args_from(["scout", "nodes"]).unwrap(),
-        Some(Command::ScoutNodes)
+        Some(Command::ScoutNodes {
+            response_format: None
+        })
     );
     // peek with defaults
     assert_eq!(
         parse_args_from(["scout", "peek", "--host", "local", "--path", "/tmp"]).unwrap(),
         Some(Command::ScoutPeek {
+            response_format: None,
             host: "local".into(),
             path: "/tmp".into(),
             tree: false,
@@ -167,6 +170,33 @@ fn scout_commands_parse() {
             assert_eq!(a.pattern, "*.conf");
         }
         other => panic!("expected ScoutFind, got {other:?}"),
+    }
+}
+
+#[test]
+fn scout_zfs_recursive_flag_parses_without_value() {
+    let cmd = parse_args_from([
+        "scout",
+        "zfs",
+        "datasets",
+        "--host",
+        "local",
+        "--pool",
+        "tank",
+        "--type",
+        "filesystem",
+        "--recursive",
+    ])
+    .unwrap();
+    match cmd {
+        Some(Command::ScoutZfs(args)) => {
+            assert_eq!(args.subaction, "datasets");
+            assert_eq!(args.host, "local");
+            assert_eq!(args.pool.as_deref(), Some("tank"));
+            assert_eq!(args.dataset_type.as_deref(), Some("filesystem"));
+            assert!(args.recursive);
+        }
+        other => panic!("expected ScoutZfs, got {other:?}"),
     }
 }
 

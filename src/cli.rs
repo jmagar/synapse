@@ -21,87 +21,30 @@ use anyhow::{anyhow, Result};
 
 // TEMPLATE: The doctor module is the §48 reference implementation.
 //           Import it from here and wire into run() below.
+pub(crate) mod color;
 pub mod doctor;
 mod flux;
+pub(crate) mod help;
 mod scout;
 pub mod setup;
 pub mod watch;
 
 pub use setup::{run_setup, SetupCommand};
 
-pub const USAGE: &str = "Usage:
-  synapse2 [serve]          Start MCP HTTP server (default)
-  synapse2 mcp              Start MCP stdio transport
+pub fn usage() -> String {
+    help::render_top_level(false)
+}
 
-  synapse2 flux docker info|df|networks|volumes [--host H]
-  synapse2 flux docker images [--host H] [--dangling-only]
-  synapse2 flux docker pull --host H --image IMG
-  synapse2 flux docker build --host H --context /abs/path --tag TAG [--dockerfile REL] [--no-cache]
-  synapse2 flux docker rmi --host H --image IMG --force
-  synapse2 flux docker prune --host H --target containers|images|volumes|networks|buildcache|all --force
-  synapse2 flux container list [--host H] [--state S] [--name-filter N] [--image-filter I] [--label-filter K=V]
-  synapse2 flux container inspect --container-id ID [--host H] [--summary]
-  synapse2 flux container logs --container-id ID [--host H] [--lines N] [--since T] [--until T] [--grep S] [--stream stdout|stderr|both]
-  synapse2 flux container stats [--container-id ID] [--host H]
-  synapse2 flux container top --container-id ID [--host H]
-  synapse2 flux container search --query Q [--host H]
-    (all flux container subactions also accept [--response-format markdown|json])
-  synapse2 flux host status [--host HOST]
-  synapse2 flux host info [--host HOST]
-  synapse2 flux host uptime [--host HOST]
-  synapse2 flux host resources [--host HOST]
-  synapse2 flux host services --host HOST [--state STATE] [--service NAME]
-  synapse2 flux host network [--host HOST]
-  synapse2 flux host mounts --host HOST
-  synapse2 flux host ports --host HOST [--protocol tcp|udp] [--limit N] [--offset N]
-  synapse2 flux host doctor --host HOST [--checks c1,c2,...]
-  synapse2 flux compose list --host HOST
-  synapse2 flux compose status --host HOST --project P [--service SVC]
-  synapse2 flux compose up --host HOST --project P
-  synapse2 flux compose down --host HOST --project P [--remove-volumes --force]
-  synapse2 flux compose restart --host HOST --project P
-  synapse2 flux compose recreate --host HOST --project P
-  synapse2 flux compose logs --host HOST --project P [--lines N] [--since T] [--service SVC]
-  synapse2 flux compose build --host HOST --project P [--service SVC]
-  synapse2 flux compose pull --host HOST --project P [--service SVC]
-  synapse2 flux compose refresh --host HOST
-  synapse2 scout nodes
-  synapse2 scout peek --host HOST --path PATH [--tree] [--depth N]
-  synapse2 scout find --host HOST --path PATH --pattern GLOB [--depth N] [--limit N]
-  synapse2 scout ps --host HOST [--sort cpu|mem|pid|time] [--grep S] [--user U] [--limit N]
-  synapse2 scout df --host HOST [--path PATH]
-  synapse2 scout delta --source-host H --source-path P (--target-host H --target-path P | --content STR)
-  synapse2 scout exec --host HOST --command CMD [--path PATH] [--args A1 A2...]
-  synapse2 scout emit --command CMD --target HOST:PATH[,HOST:PATH...] [--timeout S]
-  synapse2 scout beam --source-host H --source-path P --dest-host H --dest-path P
-  synapse2 scout zfs pools --host HOST [--pool POOL]
-  synapse2 scout zfs datasets --host HOST [--pool POOL] [--type filesystem|volume|snapshot|bookmark|all] [--recursive]
-  synapse2 scout zfs snapshots --host HOST [--pool POOL] [--dataset DS] [--limit N]
-  synapse2 scout logs syslog --host HOST [--lines N] [--grep STR]
-  synapse2 scout logs journal --host HOST [--lines N] [--unit UNIT] [--priority PRIO] [--since T] [--until T] [--grep STR]
-  synapse2 scout logs dmesg --host HOST [--lines N] [--grep STR]
-  synapse2 scout logs auth --host HOST [--lines N] [--grep STR]
-  synapse2 help                      Show JSON action reference
-  synapse2 doctor [--json]           Run environment pre-flight checks
-  synapse2 watch [--url URL] [--interval N]  Poll /health and emit on state change
-  synapse2 setup check               Check plugin setup without mutating appdata
-  synapse2 setup repair              Create missing appdata/env setup files
-  synapse2 setup plugin-hook [--no-repair]  Plugin hook JSON contract
+pub fn install_color_from_args(args: &mut Vec<String>) -> Result<()> {
+    color::install_color_from_args(args)
+}
 
-  synapse2 --help                    Show this help
-  synapse2 --version                 Show version
+pub fn maybe_handle_help(args: &[String]) -> bool {
+    help::maybe_handle_help(args)
+}
 
-Environment:
-  SYNAPSE_HOSTS_CONFIG     Host topology as a JSON array (highest priority)
-  SYNAPSE_CONFIG_FILE      Path to a hosts config file (falls back to ~/.ssh/config)
-  SYNAPSE_MCP_HOST         Bind host (default 127.0.0.1)
-  SYNAPSE_MCP_PORT         Bind port (default 40080)
-  SYNAPSE_MCP_NO_AUTH      Disable auth (loopback only)
-  SYNAPSE_MCP_TOKEN        Static bearer token
-  RUST_LOG                 Log filter (e.g. info,rmcp=warn)";
-
-pub fn usage() -> &'static str {
-    USAGE
+pub fn print_top_level_help_stderr() {
+    eprint!("{}", help::render_top_level(color::color_enabled_stderr()));
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -114,8 +57,11 @@ pub enum Command {
     FluxContainer(Box<ContainerArgs>),
     FluxHost(Box<crate::actions::HostArgs>),
     FluxCompose(Box<crate::actions::ComposeArgs>),
-    ScoutNodes,
+    ScoutNodes {
+        response_format: Option<String>,
+    },
     ScoutPeek {
+        response_format: Option<String>,
         host: String,
         path: String,
         tree: bool,
@@ -124,6 +70,7 @@ pub enum Command {
     ScoutFind(Box<ScoutFindArgs>),
     ScoutPs(Box<ScoutPsArgs>),
     ScoutDf {
+        response_format: Option<String>,
         host: String,
         path: Option<String>,
     },
@@ -135,7 +82,9 @@ pub enum Command {
     ScoutZfs(Box<ScoutZfsArgs>),
     /// B15: Log subactions via CLI.
     ScoutLogs(Box<ScoutLogsArgs>),
-    Help,
+    Help {
+        response_format: Option<String>,
+    },
     /// Pre-flight environment validation (§48).
     ///
     /// TEMPLATE: Always keep this command. It is the operator's first stop
@@ -168,7 +117,7 @@ pub enum Command {
 /// 1. Add a variant to `Command` above.
 /// 2. Add a match arm here to construct it from args.
 /// 3. Add a dispatch arm in `run()` below.
-/// 4. Update `USAGE` above.
+/// 4. Update `src/cli/help.rs`.
 pub fn parse_args() -> Result<Option<Command>> {
     parse_args_from(std::env::args().skip(1))
 }
@@ -184,10 +133,9 @@ where
         [subcommand, rest @ ..] => match subcommand.as_str() {
             "flux" => Some(flux::parse_flux(rest)?),
             "scout" => Some(scout::parse_scout(rest)?),
-            "help" => {
-                reject_args(rest, "help")?;
-                Some(Command::Help)
-            }
+            "help" => Some(Command::Help {
+                response_format: parse_output_format_flag(rest, "help")?,
+            }),
             // §48: doctor is always parsed here, dispatched via run_cli in main.rs.
             // TEMPLATE: Keep this arm. It routes to doctor::run_doctor() which needs
             //           the full Config (not just SynapseConfig), so main.rs handles it.
@@ -219,10 +167,10 @@ where
                     reject_args(flags, "setup repair")?;
                     Some(Command::Setup(SetupCommand::Repair))
                 }
-                    [action, flags @ ..] if action == "install" => {
-                        reject_args(flags, "setup install")?;
-                        Some(Command::Setup(SetupCommand::Install))
-                    }
+                [action, flags @ ..] if action == "install" => {
+                    reject_args(flags, "setup install")?;
+                    Some(Command::Setup(SetupCommand::Install))
+                }
                 [action, flags @ ..] if action == "plugin-hook" => {
                     let no_repair = parse_bool_flag(flags, "setup plugin-hook", "--no-repair")?;
                     Some(Command::Setup(SetupCommand::PluginHook { no_repair }))
@@ -252,7 +200,7 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::FluxContainer(args) => flux::run_container(args, &service, &confirmer).await?,
         Command::FluxHost(args) => flux::run_host(args, &service).await?,
         Command::FluxCompose(args) => flux::run_compose(args, &service, &confirmer).await?,
-        Command::ScoutNodes
+        Command::ScoutNodes { .. }
         | Command::ScoutPeek { .. }
         | Command::ScoutFind(_)
         | Command::ScoutPs(_)
@@ -263,7 +211,7 @@ pub async fn run(cmd: Command) -> Result<()> {
         | Command::ScoutBeam(_)
         | Command::ScoutZfs(_)
         | Command::ScoutLogs(_) => scout::run_scout(&cmd, &service, &confirmer).await?,
-        Command::Help => rest_help(),
+        Command::Help { .. } => rest_help(),
         // Doctor, Watch, and Setup are never dispatched via this function — main.rs
         // handles them directly because they need config.mcp fields.
         Command::Doctor { .. } | Command::Watch { .. } | Command::Setup(_) => {
@@ -271,8 +219,70 @@ pub async fn run(cmd: Command) -> Result<()> {
         }
     };
 
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", render_cli_output(&cmd, &result)?);
     Ok(())
+}
+
+pub(crate) fn render_cli_output(cmd: &Command, result: &serde_json::Value) -> Result<String> {
+    let (tool, action, subaction, response_format) = match cmd {
+        Command::FluxDocker(args) => (
+            "flux",
+            "docker",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::FluxContainer(args) => (
+            "flux",
+            "container",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::FluxHost(args) => (
+            "flux",
+            "host",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::FluxCompose(args) => (
+            "flux",
+            "compose",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::ScoutNodes { response_format } => {
+            ("scout", "nodes", None, response_format.as_deref())
+        }
+        Command::ScoutPeek {
+            response_format, ..
+        } => ("scout", "peek", None, response_format.as_deref()),
+        Command::ScoutFind(args) => ("scout", "find", None, args.response_format.as_deref()),
+        Command::ScoutPs(args) => ("scout", "ps", None, args.response_format.as_deref()),
+        Command::ScoutDf {
+            response_format, ..
+        } => ("scout", "df", None, response_format.as_deref()),
+        Command::ScoutDelta(args) => ("scout", "delta", None, args.response_format.as_deref()),
+        Command::ScoutExec(args) => ("scout", "exec", None, args.response_format.as_deref()),
+        Command::ScoutEmit(args) => ("scout", "emit", None, args.response_format.as_deref()),
+        Command::ScoutBeam(args) => ("scout", "beam", None, args.response_format.as_deref()),
+        Command::ScoutZfs(args) => (
+            "scout",
+            "zfs",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::ScoutLogs(args) => (
+            "scout",
+            "logs",
+            Some(args.subaction.as_str()),
+            args.response_format.as_deref(),
+        ),
+        Command::Help { response_format } => ("flux", "help", None, response_format.as_deref()),
+        Command::Doctor { .. } | Command::Watch { .. } | Command::Setup(_) => {
+            unreachable!("dispatched directly in main.rs::run_cli")
+        }
+    };
+    crate::formatters::render_action_output(tool, action, subaction, response_format, result)
+        .map_err(anyhow::Error::msg)
 }
 
 // ── arg parsing helpers ───────────────────────────────────────────────────────
@@ -327,6 +337,24 @@ fn parse_bool_flag(args: &[String], command: &str, flag: &str) -> Result<bool> {
         }
     }
     Ok(found)
+}
+
+pub(super) fn parse_output_format_flag(args: &[String], command: &str) -> Result<Option<String>> {
+    match parse_optional_response_format(args)? {
+        Some(value) => Ok(Some(value)),
+        None => {
+            reject_args(args, command)?;
+            Ok(None)
+        }
+    }
+}
+
+pub(super) fn parse_optional_response_format(args: &[String]) -> Result<Option<String>> {
+    let value = parse_optional_named_value(args, "--response-format")?;
+    if let Some(value) = value.as_deref() {
+        crate::formatters::ResponseFormat::parse(Some(value)).map_err(anyhow::Error::msg)?;
+    }
+    Ok(value)
 }
 
 fn parse_watch_flags(args: &[String]) -> Result<(Option<String>, Option<String>)> {

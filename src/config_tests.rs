@@ -148,6 +148,49 @@ fn env_list_empty_string_leaves_target_unchanged() {
     );
 }
 
+// ── dotenv loading helpers ───────────────────────────────────────────────────
+
+#[test]
+fn dotenv_entries_override_config_values() {
+    let mut config = Config::default();
+    config.mcp.host = "0.0.0.0".to_string();
+    config.mcp.port = 40060;
+
+    let entries = parse_dotenv(
+        r#"
+        SYNAPSE_MCP_HOST=127.0.0.1
+        SYNAPSE_MCP_PORT=40080
+        SYNAPSE_MCP_NO_AUTH=true
+        "#,
+        std::path::Path::new("test.env"),
+    )
+    .unwrap();
+    for (key, value) in entries {
+        apply_config_env_value(&mut config, &key, &value).unwrap();
+    }
+
+    assert_eq!(config.mcp.host, "127.0.0.1");
+    assert_eq!(config.mcp.port, 40080);
+    assert!(config.mcp.no_auth);
+}
+
+#[test]
+fn dotenv_quoted_values_unescape_quotes_and_backslashes() {
+    let entries = parse_dotenv(
+        r#"SYNAPSE_MCP_TOKEN="secret # \"quoted\" \\ token""#,
+        std::path::Path::new("test.env"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        entries,
+        vec![(
+            "SYNAPSE_MCP_TOKEN".to_string(),
+            "secret # \"quoted\" \\ token".to_string()
+        )]
+    );
+}
+
 // ── AuthMode serde parsing ────────────────────────────────────────────────────
 //
 // AuthMode parsing in Config::load() is an inline match on the env var string,
