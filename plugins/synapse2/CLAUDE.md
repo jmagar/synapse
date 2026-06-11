@@ -12,7 +12,7 @@ Multi-platform plugin package for the Synapse2 MCP server. Contains manifests fo
 | `.codex-plugin/plugin.json` | Codex manifest — same data + Codex UI fields (`interface`) |
 | `gemini-extension.json` | Gemini CLI manifest — uses `settings` array instead of `userConfig` |
 | `.mcp.json` | Shared MCP server connection config used by all three platforms |
-| `bin/synapse2` | Release binary used by the monitor — populate with `just install` |
+| `bin/synapse` | Release binary used by the monitor — populate with `just install` |
 | `hooks/hooks.json` | Lifecycle hook definitions: `SessionStart`, `ConfigChange` |
 | `hooks/plugin-setup.sh` | Deployment and validation script (server mode or client mode) |
 | `monitors/monitors.json` | Background health monitor config (requires Claude Code v2.1.105+) |
@@ -30,15 +30,15 @@ When changing user-configurable settings, update all three manifests: `userConfi
 
 ## Monitors (Claude Code v2.1.105+)
 
-`monitors/monitors.json` runs `synapse2 watch` from `${CLAUDE_PLUGIN_ROOT}/bin/synapse2`. The binary must exist at that path before the plugin is installed. Populate it with:
+`monitors/monitors.json` runs `synapse watch` from `${CLAUDE_PLUGIN_ROOT}/bin/synapse`. The binary must exist at that path before the plugin is installed. Populate it with:
 
 ```bash
-just install   # cargo build --release, then copies to plugins/synapse2/bin/synapse2
+just install   # cargo build --release, then copies to plugins/synapse2/bin/synapse
 ```
 
 The monitor command uses `${user_config.server_url}` substitution — this is resolved at runtime from the user's plugin settings. Do not hardcode URLs in `monitors.json`.
 
-When adding a new monitor: add an entry to `monitors.json` and reference only `${CLAUDE_PLUGIN_ROOT}/bin/synapse2` or scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/`. Do not reference bare binary names that depend on PATH — the monitor may start before `plugin-setup.sh` has run.
+When adding a new monitor: add an entry to `monitors.json` and reference only `${CLAUDE_PLUGIN_ROOT}/bin/synapse` or scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/`. Do not reference bare binary names that depend on PATH — the monitor may start before `plugin-setup.sh` has run.
 
 ## Updating the skill
 

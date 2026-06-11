@@ -59,13 +59,13 @@ The `${user_config.*}` / `${settings.*}` variables are populated from each platf
 
 `hooks/hooks.json` fires `plugin-setup.sh` on `SessionStart` and `ConfigChange`.
 
-The setup script is a thin adapter. It maps plugin settings to environment variables, prepares appdata, ensures the bundled binary is available on `PATH`, and delegates setup checks or repair to `synapse2 setup plugin-hook "$@"`.
+The setup script is a thin adapter. It maps plugin settings to environment variables, prepares appdata, ensures the bundled binary is available on `PATH`, and delegates setup checks or repair to `synapse setup plugin-hook "$@"`.
 
 ## Monitors
 
 **Requires Claude Code v2.1.105+.**
 
-`monitors/monitors.json` declares a background `server-health` monitor that starts automatically at session start. It runs `synapse2 watch` (the binary in `bin/`) and delivers each stdout line to Claude as a notification whenever the MCP server changes state.
+`monitors/monitors.json` declares a background `server-health` monitor that starts automatically at session start. It runs `synapse watch` (the binary in `bin/`) and delivers each stdout line to Claude as a notification whenever the MCP server changes state.
 
 The monitor emits only on state transitions — Claude is not notified while the server is stable. Three states:
 
@@ -73,10 +73,10 @@ The monitor emits only on state transitions — Claude is not notified while the
 - `DOWN` — connection refused / timeout
 - `DEGRADED(HTTP N)` — non-2xx HTTP response
 
-The command references `${CLAUDE_PLUGIN_ROOT}/bin/synapse2` — populate `bin/` before installing the plugin:
+The command references `${CLAUDE_PLUGIN_ROOT}/bin/synapse` — populate `bin/` before installing the plugin:
 
 ```bash
-just install   # builds release binary and copies to plugins/synapse2/bin/synapse2
+just install   # builds release binary and copies to plugins/synapse2/bin/synapse
 ```
 
 Disabling the plugin mid-session does not stop an already-running monitor; it stops when the session ends.
@@ -88,7 +88,7 @@ Disabling the plugin mid-session does not stop an already-running monitor; it st
 ## Packaging checklist
 
 1. Build the release binary with `just install`.
-2. Confirm `plugins/synapse2/bin/synapse2` exists and is executable.
+2. Confirm `plugins/synapse2/bin/synapse` exists and is executable.
 3. Run `cargo test --test plugin_contract`.
 4. Verify all manifests still omit explicit `version` fields.
 5. Install through the target marketplace or local plugin path.

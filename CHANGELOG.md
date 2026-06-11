@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- TEMPLATE: Add changes here as you work. They move to a version section on release. -->
 
+## [0.5.2] — 2026-06-11
+
 ### Fixed
 
 - **Config / `.env` are now honored inside Docker.** `Config::load` searched

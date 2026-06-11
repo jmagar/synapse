@@ -109,7 +109,7 @@ fn claude_hooks_delegate_to_plugin_setup_script() {
 fn plugin_setup_delegates_to_binary_owned_hook_command() {
     let setup = read("plugins/synapse2/hooks/plugin-setup.sh");
     assert!(
-        setup.contains("synapse2 setup plugin-hook"),
+        setup.contains("synapse setup plugin-hook"),
         "plugin setup should delegate to the binary-owned hook command"
     );
     assert!(

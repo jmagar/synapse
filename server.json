@@ -38,13 +38,13 @@
     "source": "github"
   },
 
-  "version": "0.5.1",
+  "version": "0.5.2",
 
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/example-mcp:0.5.1",
-      "version": "0.5.1",
+      "identifier": "ghcr.io/jmagar/example-mcp:0.5.2",
+      "version": "0.5.2",
       "environmentVariables": [
         {
           "name": "EXAMPLE_API_URL",
