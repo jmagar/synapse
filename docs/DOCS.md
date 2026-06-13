@@ -2,18 +2,21 @@
 title: "Documentation"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: true
-last_reviewed: "2026-05-15"
+last_reviewed: "2026-06-13"
 ---
 
 # Documentation
 
-This repo keeps documentation close to the automation it describes. Every file in `docs/` carries YAML frontmatter that describes its role, audience, and authority.
+This repo keeps documentation close to the automation it describes. Stable
+service guides should carry YAML frontmatter that describes their role,
+audience, and authority; generated artifacts and historical session records may
+use their native format instead.
 
 ## Directory tree
 
@@ -45,7 +48,7 @@ docs/
   ├── SYSTEMD.md                      ← user-level systemd service
   │
   ├── PLUGINS.md                      ← Claude/Codex/Gemini plugin packaging
-  ├── WEB.md                          ← embedded Next.js web UI
+  ├── WEB.md                          ← optional static web UI
   │
   ├── CI.md                           ← GitHub workflows, nextest, taplo
   ├── PRE-COMMIT.md                   ← lefthook hooks, taplo, env guard
@@ -71,10 +74,8 @@ docs/
   ├── reports/                        ← audits, investigations, reviews (transient)
   ├── research/                       ← research notes (transient)
   ├── sessions/                       ← saved session logs (transient)
+  ├── superpowers/                    ← imported Superpowers plan artifacts
   └── references/                     ← auto-fetched upstream docs (gitignored)
-      ├── INDEX.md
-      ├── CHANGES.md
-      └── mcp/
 ```
 
 ## What goes where
@@ -103,11 +104,11 @@ Every `docs/*.md` file opens with YAML frontmatter:
 title: "Human-readable title"
 doc_type: "guide"          # guide | contract | spec | session | report
 status: "active"           # active | draft | deprecated
-owner: "rmcp-template"     # repo name or team
+owner: "synapse2"          # repo name or team
 audience:
   - "contributors"
   - "agents"
-scope: "template"          # template | service | family
+scope: "service"           # service | family
 source_of_truth: false     # true only when this file IS the canonical record
 upstream_refs:             # optional: where authoritative info lives
   - "src/config.rs"
@@ -123,11 +124,14 @@ last_reviewed: "2026-05-15"
 | `status` | `active`, `draft`, `deprecated` | `active` = current and maintained; `draft` = in progress; `deprecated` = superseded by another file. |
 | `source_of_truth` | `true` / `false` | `true` only when this file IS the authoritative record. Most guides are `false` — they summarize the code or reference `PATTERNS.md`. When a doc disagrees with `source_of_truth: true` code, update the doc. |
 | `upstream_refs` | file paths | Where to go when this doc and reality diverge. Code files beat docs. |
-| `scope` | `template`, `family`, `service` | `template` = this repo only; `family` = normative across all rmcp servers; `service` = only relevant after template adaptation. |
+| `scope` | `family`, `service` | `family` = normative across all rmcp servers; `service` = Synapse2-specific. |
 
 ### CLAUDE.md / AGENTS.md / GEMINI.md
 
-`docs/CLAUDE.md` carries agent and contributor instructions for navigating this directory. It is `source_of_truth: false` because the code itself is authoritative; the file explains structure and conventions, not behavior.
+`docs/CLAUDE.md` carries agent and contributor instructions for navigating this
+directory. It is `source_of_truth: false` because the code itself is
+authoritative; the file explains structure and conventions, not runtime
+behavior.
 
 `docs/AGENTS.md` and `docs/GEMINI.md` are symlinks to `docs/CLAUDE.md` — they exist so Codex CLI and Gemini CLI find the same instructions Claude Code does. Their frontmatter is identical to `docs/CLAUDE.md` because they are the same file:
 
@@ -136,15 +140,16 @@ last_reviewed: "2026-05-15"
 title: "Documentation Instructions"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: false
 upstream_refs:
-  - "docs/references/mcp/"
-last_reviewed: "2026-05-14"
+  - "src/actions.rs"
+  - "src/config.rs"
+last_reviewed: "2026-06-13"
 ---
 ```
 

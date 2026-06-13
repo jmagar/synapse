@@ -240,15 +240,17 @@ The action must return graceful JSON for expected elicitation outcomes.
 
 ## Skill handoff
 
-The `scaffold-project` skill is responsible for turning scaffold intent JSON into a plan.
+The packaged Synapse2 skill is responsible for orienting agents to the current
+server. A future `scaffold-project` skill may turn scaffold intent JSON into a
+plan, but this repo does not currently ship that handoff skill.
 
 Location:
 
 ```text
-plugins/example/skills/scaffold-project/SKILL.md
+plugins/synapse2/skills/synapse2/SKILL.md
 ```
 
-The skill must:
+A scaffold handoff skill, if added later, must:
 
 1. Read the JSON returned by `scaffold_intent`.
 2. Preserve the selected server category and required surfaces.
@@ -310,8 +312,8 @@ The coding agent may mutate files only after the user approves the plan produced
 | MCP schema/action enum | `src/mcp/schemas.rs` via `action_names()` |
 | Generated schema docs | `docs/MCP_SCHEMA.md` |
 | Schema docs generator descriptions | `scripts/check-schema-docs.py` |
-| Tool skill reference | `plugins/example/skills/example/SKILL.md` |
-| Handoff skill | `plugins/example/skills/scaffold-project/SKILL.md` |
+| Tool skill reference | `plugins/synapse2/skills/synapse2/SKILL.md` |
+| Handoff skill | Not currently packaged |
 | Web API explorer metadata | `apps/web/lib/template.ts` |
 
 ## Validation requirements
@@ -319,7 +321,7 @@ The coding agent may mutate files only after the user approves the plan produced
 After changing this flow, run:
 
 ```bash
-cargo fmt --package rmcp-template
+cargo fmt --package synapse2
 cargo test --lib
 just schema-docs-check
 just scaffold-contract-check

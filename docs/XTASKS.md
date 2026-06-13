@@ -2,13 +2,13 @@
 title: "xtasks"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: false
-last_reviewed: "2026-05-15"
+last_reviewed: "2026-06-13"
 ---
 
 # xtasks

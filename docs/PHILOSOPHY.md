@@ -2,18 +2,19 @@
 title: "Philosophy"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: false
-last_reviewed: "2026-05-15"
+last_reviewed: "2026-06-13"
 ---
 
 # Philosophy
 
-`rmcp-template` exists to make new MCP servers safe, boring, and easy for agents to operate.
+Synapse2 follows the rmcp-template family philosophy: make MCP servers safe,
+boring, and easy for agents to operate.
 
 ## Boring by design
 
@@ -23,7 +24,7 @@ last_reviewed: "2026-05-15"
 - Clear layering between client, service, and transport shims.
 - Repeatable scripts and release gates.
 
-New servers from this template should be easy to understand, audit, and extend — not clever.
+Synapse2 should be easy to understand, audit, and extend — not clever.
 
 ## Thin shims, rich service layer
 

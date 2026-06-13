@@ -78,7 +78,7 @@ binary. No shell is involved. Optional `exec_user`, `exec_workdir`,
 {"name":"flux","arguments":{"action":"host","subaction":"mounts","host":"myhost"}}
 {"name":"flux","arguments":{"action":"host","subaction":"ports","host":"myhost","protocol":"tcp","limit":50}}
 {"name":"flux","arguments":{"action":"host","subaction":"doctor","host":"myhost"}}
-{"name":"flux","arguments":{"action":"host","subaction":"doctor","host":"myhost","checks":"docker,ssh,disk"}}
+{"name":"flux","arguments":{"action":"host","subaction":"doctor","host":"myhost","checks":"docker,containers,resources"}}
 ```
 
 #### `action="compose"` — Compose project management (10 subactions)
@@ -229,7 +229,7 @@ synapse flux docker pull --host myhost --image nginx:latest
 synapse flux container list
 synapse flux container list --state running
 synapse flux container logs --container-id abc123 --lines 100
-synapse flux container exec --container-id abc123 -- ls -la /var/log
+synapse flux container exec --container-id abc123 --command ls -la /var/log
 
 # flux host
 synapse flux host status

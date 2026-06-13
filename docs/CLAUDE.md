@@ -2,22 +2,28 @@
 title: "Documentation Instructions"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: false
 upstream_refs:
-  - "docs/references/mcp/"
-last_reviewed: "2026-05-14"
+  - "src/actions.rs"
+  - "src/config.rs"
+  - "docs/PATTERNS.md"
+last_reviewed: "2026-06-13"
 ---
 
 # Documentation Instructions
 
-This directory contains guides, reference material, and working records for the rmcp-template project and the Rust MCP server family it governs.
+This directory contains guides, reference material, generated contracts, and
+working records for the Synapse2 Rust MCP server.
 
-Both humans and LLM agents operate this codebase. Write docs, contracts, specs, examples, and commands assuming both audiences. Prefer structured, runnable, and self-contained content. Avoid prose that only makes sense in context of a prior conversation.
+Both humans and agents operate this codebase. Write docs, contracts, specs,
+examples, and commands assuming both audiences. Prefer structured, runnable, and
+self-contained content. Avoid prose that only makes sense in the context of a
+prior conversation.
 
 ---
 
@@ -25,10 +31,18 @@ Both humans and LLM agents operate this codebase. Write docs, contracts, specs, 
 
 Use the right layer for the job:
 
-- `docs/*.md` — Orientation, architecture narrative, cross-cutting guidance, and stable how-to guides. These are the map.
-- `docs/references/mcp/` — Snapshots of the official MCP specification, registry, and tooling documentation. Treat as the authoritative source for MCP protocol behavior at the captured revision.
-
-There are no `contracts/`, `specs/`, or `reports/` directories yet. If durable implementation contracts or investigation reports are added, create those directories and record their authority in this file.
+- `docs/*.md` — Stable service guides: setup, architecture, API, deployment,
+  testing, and operations.
+- `docs/PATTERNS.md` — Family-level rmcp server patterns inherited from
+  `rmcp-template`. Keep illustrative `example` / `EXAMPLE_*` snippets there
+  when they describe how to adapt a new server.
+- `docs/generated/` — Machine-produced contracts committed for compatibility
+  checks, especially OpenAPI output.
+- `docs/contracts/` — Durable JSON schemas and example payloads.
+- `docs/specs/` — Design specs and handoff docs for protocol or workflow
+  features.
+- `docs/plans/`, `docs/reports/`, `docs/research/`, `docs/sessions/` —
+  working artifacts. Promote accepted requirements from these into stable docs.
 
 ---
 
@@ -36,61 +50,73 @@ There are no `contracts/`, `specs/`, or `reports/` directories yet. If durable i
 
 | File | Purpose | Update when |
 |---|---|---|
-| `QUICKSTART.md` | Five-minute getting-started guide | The startup sequence, CLI commands, or port changes |
-| `AUTH.md` | Auth model: bearer tokens, OAuth, startup guard, gateway case | Auth behavior or env vars change |
-| `PATTERNS.md` | Canonical patterns for the entire rmcp server family | The module structure, thin-shim rule, or family-wide conventions change |
-| `MCP-REGISTRY-PUBLISH-GUIDE.md` | How to publish a derived server to the official MCP registry | The mcp-publisher CLI, registry schema, or CI publish workflow changes |
-| `CLAUDE.md` (this file) | Instructions for agents and contributors navigating this directory | The directory structure or doc authority changes |
+| `README.md` | High-level documentation index | Adding, removing, or renaming docs |
+| `QUICKSTART.md` | Local smoke test path | Startup sequence, CLI flags, port, or auth env changes |
+| `API.md` | MCP, CLI, and REST action reference | Actions, parameters, scopes, or parity behavior changes |
+| `MCP_SCHEMA.md` | Generated MCP schema contract | `ACTION_SPECS` changes |
+| `AUTH.md` | Bearer/OAuth/auth-policy behavior | Auth mode, scope, token, or gateway behavior changes |
+| `CONFIG.md` / `ENV.md` | Config loading and environment variables | `src/config.rs` or host-config loading changes |
+| `ARCHITECTURE.md` | Module map and layering | Service/module boundaries change |
+| `DEPLOYMENT.md`, `DOCKER.md`, `SYSTEMD.md` | Runtime deployment guides | Container, systemd, port, or appdata behavior changes |
+| `PLUGINS.md` | Claude/Codex/Gemini plugin packaging | Plugin manifests or hook scripts change |
+| `PATTERNS.md` | rmcp-family conventions | A reusable family pattern changes |
+| `CLAUDE.md` (this file) | Instructions for agents and contributors navigating docs | Directory structure or doc authority changes |
 
 ---
 
 ## References
 
-`docs/references/mcp/` contains snapshots of the MCP specification, SEPs, registry docs, and tooling references. Treat these as the source-of-truth for MCP protocol behavior as captured in this repo.
+`docs/references/` is intentionally gitignored and populated by
+`scripts/refresh-docs.sh` when upstream MCP or registry docs need to be captured.
+Prefer captured references before raw web search for protocol behavior, but
+verify upstream when a spec area is fast-moving or marked preview.
 
-- Prefer `docs/references/mcp/` before web search when implementing or verifying MCP protocol behavior.
-- If the captured reference is suspected stale or ambiguous for a fast-moving spec area (elicitation, extensions, registry preview), verify against the upstream source before changing behavior.
-- When upstream marks material as `preview`, `draft`, `proposal`, `RFD`, or `SEP`, mirror that status in any derived docs.
-
-Do not treat seed transcripts or conversation context as sufficient evidence for what the spec requires. If spec behavior matters, cite the reference file.
+Do not treat seed transcripts or conversation context as sufficient evidence for
+what the spec requires. If spec behavior matters, cite the reference file or the
+current upstream source.
 
 ---
 
 ## Naming
 
-- The binary and template identifiers use `example` / `Example` / `EXAMPLE_` as placeholders. These are renamed when the template is adapted.
-- The pattern family is `rmcp-server`. Member servers include `lab`, `axon_rust`, `syslog-mcp`, `rustify`, `rustifi`, `apprise-mcp`, `rustscale`, `unrust`, and this template.
-- Do not rewrite captured reference snapshots or upstream repopacks to match current naming. Those files preserve provenance.
+- Current binary: `synapse`
+- Current repo/service: `synapse2`
+- Current env prefix: `SYNAPSE_*` and `SYNAPSE_MCP_*`
+- Current REST action endpoint: `POST /v1/synapse2`
+- Current MCP tools: `flux` and `scout`
+
+Do not add new `SYNAPSE2_*`, `EXAMPLE_*`, `example-mcp`, or `/v1/example`
+references to service docs. Those names may appear in `docs/PATTERNS.md` only
+when they are intentionally documenting reusable template-family examples.
 
 ---
 
-## Template Adaptation
+## Source of Truth
 
-This repo is a template. Every doc in this directory contains `TEMPLATE:` markers where values must be changed when the template is adapted for a real service. When editing docs:
+- Actions, scopes, and MCP schema: `src/actions.rs`, `src/mcp/schemas.rs`, and
+  `docs/MCP_SCHEMA.md` after regeneration.
+- CLI flags: `src/cli.rs` and live `synapse --help` output.
+- Config and env vars: `src/config.rs`, `src/host_config.rs`, and `.env.example`.
+- Agent memory files: root `CLAUDE.md`; `AGENTS.md` and `GEMINI.md` must be
+  symlinks to it. The same rule applies in `docs/`, `apps/web/`, and
+  `plugins/synapse2/`.
 
-- Keep template markers in place unless you are explicitly adapting the template, not just editing it.
-- Do not remove the `TEMPLATE:` sections from `PATTERNS.md` — they govern the entire family.
-- The `PATTERNS.md` patterns are normative across all family members. Deviation requires an explicit decision recorded in that repo.
+After adding any new `CLAUDE.md` anywhere in the repo, regenerate the symlinks:
 
----
-
-## Working Artifact Directories
-
-There are none yet. If you add them:
-
-- `docs/plans/` — durable implementation plans and task breakdowns.
-- `docs/reports/` — audits, investigations, review results.
-- `docs/sessions/` — saved session notes and handoff records.
-- `docs/generated/` — small machine-produced contracts that are committed when they are part of CI/API compatibility, such as `openapi.json`.
-
-Artifacts in those directories inform but do not override the stable docs in `docs/*.md`. If a working artifact contains an accepted requirement, promote it into the appropriate stable doc.
+```bash
+just symlink-docs
+# or: cargo xtask symlink-docs
+```
 
 ---
 
 ## Style
 
-- Short, direct sections with clear ownership.
-- Examples should be runnable as written. Verify port numbers, command names, and flag names against the code before committing.
-- Keep generated or historical material out of guides. If something belongs in a guide, distill it; don't paste.
-- Do not move broad architecture into narrow docs only. Top-level docs should remain the map.
-- Env var names are authoritative in `src/config.rs`. If a doc disagrees with the code, update the doc.
+- Keep examples runnable as written. Verify port numbers, command names, and
+  flag names against the code before committing.
+- Keep historical or generated material out of stable guides unless distilled
+  into current guidance.
+- When a doc summarizes code, link back to the code path in frontmatter or text.
+- When a change touches actions, run `just schema-docs` and update schema docs.
+- When a change touches deployment or runtime env, update both `docs/ENV.md` and
+  `.env.example` if applicable.

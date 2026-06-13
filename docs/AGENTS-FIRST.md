@@ -2,18 +2,19 @@
 title: "Agents-First Design"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
-scope: "template"
+scope: "service"
 source_of_truth: false
-last_reviewed: "2026-05-15"
+last_reviewed: "2026-06-13"
 ---
 
 # Agents-first design
 
-This template is optimized for AI agents as primary operators and consumers. Design rule: if an agent can't use it cleanly, fix the output, not the agent.
+Synapse2 is optimized for AI agents as primary operators and consumers. Design
+rule: if an agent can't use it cleanly, fix the output, not the agent.
 
 ## Design rules
 

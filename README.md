@@ -14,7 +14,7 @@ commands, covering all 59 production actions from the original TypeScript server
 | MCP | Required | Agent-facing `flux` and `scout` tools |
 | CLI | Required | Scriptable parity surface |
 | REST | Present | Thin local action endpoint |
-| Web | Present | Lightweight template admin shell |
+| Web | Present | Lightweight static admin shell |
 
 ## Tools and Actions
 

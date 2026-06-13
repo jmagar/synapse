@@ -6,9 +6,9 @@ This directory contains focused guides for operating, testing, and releasing the
 
 | Doc | Use when you want to... |
 |---|---|
-| `QUICKSTART.md` | Get the template running quickly. |
+| `QUICKSTART.md` | Run a local Synapse2 smoke test quickly. |
 | `ARCHITECTURE.md` | Understand the Rust module layout and layering rules. |
-| `PHILOSOPHY.md` | Understand the design principles behind the template. |
+| `PHILOSOPHY.md` | Understand the design principles behind the rmcp server family. |
 | `AGENTS-FIRST.md` | Build outputs and workflows that are reliable for AI agents. |
 | `PATTERNS.md` | Read the canonical long-form pattern catalog. |
 

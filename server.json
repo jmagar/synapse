@@ -1,77 +1,68 @@
-<!-- TEMPLATE: server.json — MCP Registry manifest for publishing your server.
-     See docs/MCP-REGISTRY-PUBLISH-GUIDE.md for step-by-step publishing instructions.
-
-     Field reference:
-       $schema        — Always use this exact URL for 2025-12-11 schema validation.
-       name           — TEMPLATE: Reverse-DNS namespace: "yourdomain.com/your-service-mcp".
-                        Use the domain you own (DNS-based identity proof required to publish).
-                        The tv.tootie/ prefix belongs to this project's author.
-       title          — TEMPLATE: Human-readable display name shown in MCP registry UIs.
-       description    — TEMPLATE: One-sentence description of what the server does.
-       repository.url — TEMPLATE: Your GitHub (or GitLab) repo URL.
-       repository.source — Leave as "github" (or change to "gitlab").
-       version        — TEMPLATE: Semantic version. Automated by release.yml on tags.
-       packages       — List of distribution packages. OCI (Docker) is the standard format.
-         registryType — "oci" for container images. Other options: "npm", "pypi".
-         identifier   — TEMPLATE: Full OCI image ref with version tag.
-                        Pattern: ghcr.io/<org>/<repo>:<version>
-         version      — TEMPLATE: Must match the top-level version field.
-         environmentVariables — All env vars the container needs. List every required var.
-           name        — Exact env var name (used by registry UIs to generate setup forms).
-           description — TEMPLATE: User-visible description shown in the registry UI.
-           isRequired  — true: server fails to start without it. false: optional feature.
-           isSecret    — true: registry UI masks the value (API keys, tokens, passwords).
-       remotes        — TEMPLATE: Where users connect to a hosted instance of this server.
-                        Remove this block if you don't run a public hosted instance.
-         type         — "streamable-http" is the modern MCP transport (preferred over SSE).
-         url          — TEMPLATE: Replace with your actual hosted /mcp endpoint URL.
--->
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-
-  "name": "tv.tootie/example-mcp",
-  "title": "Example MCP",
-  "description": "TEMPLATE: Replace with your server description — one sentence describing what service this MCP server exposes.",
-
+  "name": "tv.tootie/synapse2",
+  "title": "Synapse2",
+  "description": "Local Docker, Compose, host, SSH, log, ZFS, and file operations for MCP agents.",
   "repository": {
-    "url": "https://github.com/jmagar/example-mcp",
+    "url": "https://github.com/jmagar/synapse2",
     "source": "github"
   },
-
   "version": "0.5.2",
-
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/example-mcp:0.5.2",
+      "identifier": "ghcr.io/jmagar/synapse2:0.5.2",
       "version": "0.5.2",
       "environmentVariables": [
         {
-          "name": "EXAMPLE_API_URL",
-          "description": "TEMPLATE: Replace with your service's base URL description. Example: 'Base URL of your Example service, e.g. https://api.example.com/v1'.",
-          "isRequired": true,
+          "name": "SYNAPSE_MCP_TOKEN",
+          "description": "Static bearer token for /mcp authentication when running mounted HTTP in bearer mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "SYNAPSE_HOSTS_CONFIG",
+          "description": "Optional inline JSON host topology. If unset, Synapse2 discovers SSH hosts from ~/.ssh/config and appends the built-in local host.",
+          "isRequired": false,
           "isSecret": false
         },
         {
-          "name": "EXAMPLE_API_KEY",
-          "description": "TEMPLATE: Replace with your service's API key description. Example: 'API key for authenticating to the Example service.'",
-          "isRequired": true,
+          "name": "SYNAPSE_CONFIG_FILE",
+          "description": "Optional path to a JSON host topology file with a top-level hosts array.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SYNAPSE_MCP_AUTH_MODE",
+          "description": "Authentication mode for mounted HTTP: bearer or oauth.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SYNAPSE_MCP_PUBLIC_URL",
+          "description": "Public HTTPS base URL required when OAuth mode is enabled.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SYNAPSE_MCP_GOOGLE_CLIENT_ID",
+          "description": "Google OAuth client ID, required only when OAuth mode is enabled.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET",
+          "description": "Google OAuth client secret, required only when OAuth mode is enabled.",
+          "isRequired": false,
           "isSecret": true
         },
         {
-          "name": "EXAMPLE_MCP_TOKEN",
-          "description": "Bearer token for MCP endpoint authentication. All /mcp requests must include: Authorization: Bearer <token>. Generate with: openssl rand -hex 32.",
+          "name": "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",
+          "description": "Initial admin Google account email, required only when OAuth mode is enabled.",
           "isRequired": false,
-          "isSecret": true
+          "isSecret": false
         }
       ]
-    }
-  ],
-
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://example.yourdomain.com/mcp"
     }
   ]
 }

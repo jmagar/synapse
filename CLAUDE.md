@@ -1,180 +1,211 @@
-# rmcp-template — Claude Code instructions
+# synapse2 — Claude Code instructions
 
 ## What this project is
 
-A reusable Rust template for building MCP servers with the rmcp crate. The binary is named `example`. All stub identifiers (`Example*`, `EXAMPLE_*`) are renamed when the template is used for a real service.
+`synapse2` is the Rust MCP and CLI server for local Synapse workflows. It is a
+full-parity Rust port of `synapse-mcp`, exposing two MCP tools:
+
+- `flux` for Docker daemon, container, host, and Compose operations.
+- `scout` for SSH/local filesystem, process, ZFS, log, transfer, and allowlisted
+  command operations.
+
+The binary is named `synapse`. HTTP MCP defaults to `127.0.0.1:40080`, and the
+REST compatibility endpoint is `POST /v1/synapse2`.
 
 ## Module map
 
 | File | Role |
 |------|------|
-| `src/example.rs` | `ExampleClient` — HTTP/API transport stub; one method per remote operation |
-| `src/app.rs` | `ExampleService` — business layer; all logic lives here, never in shims |
-| `src/server.rs` | `AppState`, `AuthPolicy`, `build_auth_layer` — HTTP server state and auth policy |
-| `src/server/routes.rs` | Axum router: `/mcp`, `/health`, `/status`, OAuth discovery routes |
-| `src/api.rs` | REST API handlers: `POST /v1/example`, `GET /health`, `GET /status` |
-| `src/mcp.rs` | MCP protocol layer — re-exports from `mcp/` submodules |
-| `src/mcp/tools.rs` | MCP shim: parse JSON args → call service → return `Value` |
-| `src/mcp/schemas.rs` | Tool JSON schema derived from `ACTION_SPECS` |
-| `src/mcp/rmcp_server.rs` | `ServerHandler` impl: tools, resources, prompts, scope checks |
-| `src/mcp/prompts.rs` | MCP prompts (`quick_start`) |
-| `src/config.rs` | `Config`, `ExampleConfig`, `McpConfig`, `AuthConfig`, env loading |
-| `src/cli.rs` | CLI shim: parse args → call service → print |
-| `src/cli/doctor.rs` | Pre-flight checks: env, connectivity, config validation |
-| `src/cli/setup.rs` | Interactive first-run / plugin setup wizard |
-| `src/cli/watch.rs` | Polls `/health` and emits state-change lines for plugin monitor |
-| `src/mcp/transport.rs` | Streamable HTTP transport wiring and session lifecycle |
-| `src/token_limit.rs` | Token budget enforcement for MCP response payloads |
-| `src/main.rs` | Mode dispatch: HTTP server / stdio / CLI |
-| `src/lib.rs` | Public API + `testing` helpers for integration tests |
-| `tests/cli_parse.rs` | CLI argument parsing tests |
-| `tests/tool_dispatch.rs` | MCP tool dispatch tests (service-layer, no real credentials) |
+| `src/app.rs` | `SynapseService` facade over `FluxService` and `ScoutService`; keep it thin. |
+| `src/flux_service.rs` | Flux domain root: shared host resolution, Docker cache, Compose discovery, help. |
+| `src/flux_service/docker_driver.rs` | Flux Docker driver methods. |
+| `src/flux_service/container_driver.rs` | Flux container driver methods. |
+| `src/flux_service/host_driver.rs` | Flux host inspection driver methods. |
+| `src/flux_service/compose_driver.rs` | Flux Compose driver methods. |
+| `src/flux_service/docker.rs` | Pure Docker helper functions and validation. |
+| `src/flux_service/container_read.rs` | Pure container read helpers. |
+| `src/flux_service/container_lifecycle.rs` | Pure container lifecycle helpers. |
+| `src/flux_service/host.rs` | Pure host exec helpers. |
+| `src/flux_service/compose_ops.rs` | Pure Compose command-building/result helpers. |
+| `src/scout_service.rs` | Scout domain root and shared helpers. |
+| `src/scout_service/` | Scout exec, fs, logs, proc, and zfs implementations. |
+| `src/actions.rs` and `src/actions/` | Typed action parsing, scopes, REST/MCP dispatch metadata. |
+| `src/mcp/tools.rs` | MCP shim: parse JSON args, call service, return `Value`. |
+| `src/mcp/schemas.rs` | MCP tool JSON schema derived from action metadata. |
+| `src/mcp/help.rs` | Topic help text for every shipped action/subaction. |
+| `src/mcp/rmcp_server.rs` | `ServerHandler` impl: tools/resources/prompts and scope checks. |
+| `src/server.rs` and `src/server/routes.rs` | HTTP server state, auth policy, Axum routes. |
+| `src/api.rs` | REST compatibility handlers for `/v1/synapse2`, `/health`, `/status`. |
+| `src/config.rs` | `Config`, `McpConfig`, `AuthConfig`, dotenv/env/config loading. |
+| `src/cli.rs` and `src/cli/` | CLI parsing/dispatch, doctor, setup, watch, help. |
+| `src/docker_client.rs` and `src/docker_client/` | Bollard Docker trait surface, cache, mocks, transport. |
+| `src/ssh.rs` | SSH execution/session pool and forwarded Docker socket support. |
+| `src/token_limit.rs` and `src/runtime_budget.rs` | Response byte caps and operation deadlines. |
+| `src/main.rs` | Mode dispatch: HTTP server, stdio MCP, CLI. |
+| `src/lib.rs` | Public API plus `testing` helpers for integration tests. |
+| `tests/cli_parse.rs` | CLI argument parsing tests. |
+| `tests/tool_dispatch.rs` | MCP tool dispatch tests using loopback state. |
+| `tests/api_routes.rs` | REST route/auth tests. |
 
-## The thin-shim rule — enforce this hard
+## Thin-shim rule
 
-`src/mcp/tools.rs` and `src/cli.rs` contain **zero business logic**. They only:
-1. Parse their input format (JSON args or CLI flags)
-2. Call the corresponding `ExampleService` method
-3. Return the result
+`src/mcp/tools.rs`, `src/api.rs`, and `src/cli.rs` contain no business logic.
+They only parse their input format, call the relevant service method, and render
+or return the result. Put validation, filtering, mutation sequencing, fanout,
+Docker/SSH behavior, and response shaping in the domain modules.
 
-If you find yourself computing, filtering, transforming, or validating data in `tools.rs` or `cli.rs`, stop and move it to `app.rs`.
+## No monoliths
 
-## NO MONOLITHS — small, focused modules (enforced)
+Production Rust modules are checked by `scripts/check-rust-module-size.sh` via
+lefthook, `just module-size-check`, and CI:
 
-This is a hard rule, enforced by a gate, not a suggestion.
+- Soft advisory: 400 real-code lines.
+- Hard failure: 1000 real-code lines.
+- Test sidecars (`*_tests.rs`) and `tests/` are exempt.
 
-- **Line budget (two-tier):** real-code lines per **production** module (non-comment, non-blank, non-doc; test files `*_tests.rs`/`tests/` exempt), enforced by `scripts/check-rust-module-size.sh` via the lefthook `file_size` hook, `just module-size-check`, and CI.
-  - **Soft 400 — advisory.** Crossing 400 prints a "check cohesion" notice but does **not** fail. It's a prompt to ask "is this module still one focused thing?", not an automatic split mandate. A cohesive 380-line module is fine; a 250-line module doing five unrelated things is not (and no line gate catches that — use judgment).
-  - **Hard 1000 — blocking.** A module over 1000 real-code lines is a monolith and **fails** the build. Split it into focused siblings (`foo.rs` + `foo/` submodules).
-  - Line count is a proxy; the real targets are the **no-god-object** rule below and module cohesion. Don't split a cohesive module just to drop under 400.
-- **When a file approaches the budget, split it** into sibling modules: `foo.rs` + a `foo/` directory of focused submodules. **Never create `mod.rs`** (`xtask` bans it); declare submodules from `foo.rs`. Keep the matching `foo_tests.rs` sibling for each.
-- **No god-objects.** The service layer is **pre-split** into `FluxService` (Docker/container/host/compose) and `ScoutService` (host/SSH/filesystem ops). `SynapseService` is a **thin facade** that holds both (plus template `greet`/`echo`/`status`/`scaffold_intent`) — it must **not** accumulate domain logic or grow a long method list. When adding a `flux` action, put the method on `FluxService`; a `scout` action goes on `ScoutService`. Do not add domain methods directly to `SynapseService`.
-- **Why:** an unsupervised `lavra-work` run built `docker_client.rs` to 510 LOC and a 24-method `SynapseService` before this gate existed. The gate + the pre-split exist to prevent that. If you are a `lavra-work`/parity-port agent, **read this section before writing modules** — a monolithic file will fail CI and the pre-commit hook.
+Use sibling modules (`foo.rs` plus `foo/` children) and never create `mod.rs`.
+`xtask` and the pattern checker enforce this.
 
-## How to add an action (4-file checklist)
+`SynapseService` must remain a thin facade. Add `flux` behavior to
+`FluxService` or its focused submodules. Add `scout` behavior to `ScoutService`
+or its focused submodules.
 
-1. **`src/example.rs`** — add `pub async fn your_action(&self, ...) -> Result<Value>` with the actual HTTP/API call (or stub).
+## Adding or changing an action
 
-2. **`src/app.rs`** — add a delegating method: `pub async fn your_action(&self, ...) -> Result<Value> { self.client.your_action(...).await }`.
+1. Update the relevant domain service:
+   - Flux: `src/flux_service/*`
+   - Scout: `src/scout_service/*`
+2. Update typed action parsing and scope semantics in `src/actions/`.
+3. Update MCP dispatch in `src/mcp/tools.rs`.
+4. Update CLI parsing and run dispatch in `src/cli.rs` or `src/cli/flux.rs` /
+   `src/cli/scout.rs`.
+5. Update MCP schema parameters in `src/mcp/schemas.rs`.
+6. Update topic help in `src/mcp/help.rs`.
+7. Update docs that list actions: `README.md`, `docs/API.md`,
+   `docs/MCP_SCHEMA.md`, and `plugins/synapse2/skills/synapse2/`.
+8. Add tests:
+   - parser coverage in `tests/cli_parse.rs`
+   - MCP dispatch coverage in `tests/tool_dispatch.rs`
+   - service/helper coverage in the nearest sibling `*_tests.rs`
+9. Add a `CHANGELOG.md` entry when the change is user-visible.
 
-3. **`src/actions.rs`** — add the action to `ACTION_SPECS`, including scope and transport.
+The help map is manual. If a new action lacks a `src/mcp/help.rs` topic, live
+`help` calls will drift even when schemas compile.
 
-4. **`src/mcp/schemas.rs`** — add any new parameters to `tool_definitions()`; the action enum comes from `ACTION_SPECS`.
+## Auth and scope model
 
-5. **`src/mcp/tools.rs`** — add a match arm in `dispatch_example()`: `"your_action" => { ... state.service.your_action(...).await }`. Also add to `HELP_TEXT`.
+| Policy | When | Effect |
+|---|---|---|
+| `AuthPolicy::LoopbackDev` | loopback bind or loopback no-auth | No auth middleware; scopes bypassed. |
+| `AuthPolicy::TrustedGatewayUnscoped` | `SYNAPSE_NOAUTH=true` on a non-loopback trusted gateway deployment | No local auth middleware; scopes bypassed because the gateway owns authz. |
+| `AuthPolicy::Mounted { auth_state: None }` | default non-loopback bearer mode | Static bearer token required. |
+| `AuthPolicy::Mounted { auth_state: Some(_) }` | `SYNAPSE_MCP_AUTH_MODE=oauth` | Google OAuth plus RS256 JWT issuance. |
 
-6. **`src/cli.rs`** — add a `Command` variant, a parse arm in `parse_args()`, and a dispatch arm in `run()`.
+Scopes are `synapse:read` and `synapse:write`; write satisfies read. Public
+`help` actions require no scope. Unknown actions fail closed.
 
-7. **`tests/tool_dispatch.rs`** — add a test.
-
-8. **`src/mcp/help.rs`** — add a help-text entry to the static `HashMap` keyed by `"<domain>:<action>"` (e.g., `"container:list"`, `"zfs:pools"`). For scout simple actions (no subaction), key is just the action name (e.g., `"exec"`, `"nodes"`). Also add the key to `flux_topic_keys()` or `scout_topic_keys()` filter logic if needed.
-
-   **Manual-sync rule**: the help map is NOT auto-generated from `ACTION_SPECS`. Synchronization is enforced by code review at action-add time — there is no meta-test. When your PR adds an action, the reviewer must check that a help entry exists. If you skip step 8, the `help` action will return "unknown topic" for your new action.
-
-9. **`CHANGELOG.md`** — add an entry under `[Unreleased]` describing the new action.
-
-For actions with parameters, extract them with `string_arg(&args, "param_name")` in `tools.rs`.
-
-## Auth model
-
-`AuthPolicy` is an enum with three states:
-
-| Variant | When | Effect |
-|---------|------|--------|
-| `AuthPolicy::LoopbackDev` | `no_auth=true` or host is loopback (`localhost`, `127.*`, `::1`) via `McpConfig::is_loopback()` | No auth middleware; scope checks bypassed |
-| `AuthPolicy::TrustedGatewayUnscoped` | `EXAMPLE_NOAUTH=true` on non-loopback behind an authz-enforcing gateway | No auth middleware; scope checks bypassed |
-| `AuthPolicy::Mounted { auth_state: None }` | Default non-loopback | Static bearer token required |
-| `AuthPolicy::Mounted { auth_state: Some(_) }` | `auth_mode = "oauth"` | Full Google OAuth + RS256 JWT issuance |
-
-Auth is selected in `build_auth_policy()` in `main.rs`. Scopes are `example:read` and `example:write` (write satisfies read). `help` requires no scope. Unknown actions get `DENY_SCOPE`.
+Destructive operations use the `Confirmer` gate. MCP uses elicitation, CLI prints
+a warning and proceeds, and REST denies confirmation-gated actions unless
+`SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true` substitutes `NoConfirm`. Startup refuses
+that override on non-loopback binds.
 
 ## Environment variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `EXAMPLE_API_URL` | — | Upstream service base URL |
-| `EXAMPLE_API_KEY` | — | Upstream service API key |
-| `EXAMPLE_MCP_HOST` | `127.0.0.1` | Bind host |
-| `EXAMPLE_MCP_PORT` | `40080` | Bind port |
-| `EXAMPLE_MCP_NO_AUTH` | `false` | Disable auth (loopback only) |
-| `EXAMPLE_MCP_TOKEN` | — | Static bearer token |
-| `EXAMPLE_MCP_ALLOWED_HOSTS` | — | Extra comma-separated Host header values |
-| `EXAMPLE_MCP_ALLOWED_ORIGINS` | — | Extra comma-separated CORS origins |
-| `EXAMPLE_MCP_PUBLIC_URL` | — | Public URL for OAuth metadata endpoints |
-| `EXAMPLE_MCP_AUTH_MODE` | `bearer` | `bearer` or `oauth` |
-| `EXAMPLE_MCP_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
-| `EXAMPLE_MCP_GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
-| `EXAMPLE_MCP_AUTH_ADMIN_EMAIL` | — | OAuth admin email |
-| `RUST_LOG` | `info` | Log filter |
+|---|---|---|
+| `SYNAPSE_MCP_HOST` | `127.0.0.1` | HTTP bind host. |
+| `SYNAPSE_MCP_PORT` | `40080` | HTTP bind port. |
+| `SYNAPSE_MCP_SERVER_NAME` | `synapse2` | MCP server name. |
+| `SYNAPSE_MCP_NO_AUTH` | `false` | Disable auth for loopback dev only. |
+| `SYNAPSE_NOAUTH` | `false` | Trusted gateway no-auth mode. |
+| `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | `false` | Skip destructive confirmation prompts; loopback only. |
+| `SYNAPSE_MCP_TOKEN` | unset | Static bearer token. |
+| `SYNAPSE_MCP_ALLOWED_HOSTS` | unset | Extra accepted Host header values. |
+| `SYNAPSE_MCP_ALLOWED_ORIGINS` | unset | Extra CORS origins. |
+| `SYNAPSE_MCP_PUBLIC_URL` | unset | Public URL for OAuth metadata. |
+| `SYNAPSE_MCP_AUTH_MODE` | `bearer` | `bearer` or `oauth`. |
+| `SYNAPSE_MCP_GOOGLE_CLIENT_ID` | unset | Google OAuth client id. |
+| `SYNAPSE_MCP_GOOGLE_CLIENT_SECRET` | unset | Google OAuth secret. |
+| `SYNAPSE_MCP_AUTH_ADMIN_EMAIL` | unset | Bootstrap OAuth admin email. |
+| `SYNAPSE_HOSTS_CONFIG` | unset | Inline host topology JSON. |
+| `SYNAPSE_CONFIG_FILE` | unset | Host config file path. |
+| `SYNAPSE_HOME` | platform appdata | Appdata root; defaults to `~/.synapse2` outside containers and `/data` in containers. |
+| `RUST_LOG` | `info` | Tracing filter. |
 
-## Elicitation
-
-The `elicit_name` action demonstrates MCP elicitation (spec 2025-06-18). The server calls `peer.elicit::<T>()` to ask the MCP client for user input mid-call. The type `T` must:
-- Derive `JsonSchema`, `Serialize`, `Deserialize`
-- Be an object (struct), not a primitive
-- Be registered with `rmcp::elicit_safe!(T)`
-
-`ElicitationError::CapabilityNotSupported` is handled gracefully — clients that don't support it get a fallback message instead of an error.
+See `.env.example`, `config.example.toml`, `docs/CONFIG.md`, and `docs/ENV.md`
+for the full runtime contract.
 
 ## Build commands
 
 ```bash
-cargo build --release     # produces target/release/example
-cargo test                # all tests
-cargo clippy -- -D warnings  # lint (must pass)
-cargo fmt                 # format
+cargo build --release
+cargo test --locked
+cargo clippy --locked -- -D warnings
+cargo fmt --check
 
-just dev                  # EXAMPLE_MCP_HOST=127.0.0.1 EXAMPLE_MCP_NO_AUTH=true cargo run -- serve mcp (loopback only, no auth)
-just test                 # cargo test
-just lint                 # cargo clippy -- -D warnings
-just fmt                  # cargo fmt
-just gen-token            # openssl rand -hex 32
-just health               # curl http://localhost:40080/health | jq .
+just dev
+just test
+just lint
+just fmt
+just gen-token
+just health
+```
+
+`cargo-llvm-cov` coverage currently needs the direct-rustc workaround on this
+host when the local `sccache-wrapper` mishandles `--check-cfg`:
+
+```bash
+env -u RUSTC_WRAPPER \
+  RUSTC=/home/jmagar/.rustup/toolchains/1.94.0-x86_64-unknown-linux-gnu/bin/rustc \
+  cargo llvm-cov --locked --workspace --lcov --output-path target/llvm-cov/lcov.info
 ```
 
 ## Test helpers
 
-`src/lib.rs` exports `testing::loopback_state()` and `testing::bearer_state(token)` (behind `features = ["test-support"]` or `cfg(test)`). Use these in integration tests — they build `AppState` without real credentials.
+`src/lib.rs` exports `testing::loopback_state()` and `testing::bearer_state(token)`
+behind `features = ["test-support"]` or `cfg(test)`. Use these in integration
+tests to build `AppState` without real credentials.
 
-## CLI ↔ MCP action parity
+Prefer sibling sidecar tests for production modules (`src/foo_tests.rs` or
+`src/foo/bar_tests.rs`). Integration tests belong in `tests/`.
 
-Every action in the MCP tool must also be reachable from the CLI, and vice versa.
-Both shims call the same `ExampleService` methods, so parity is automatic when the
-shims are complete.
+## CLI and MCP parity
 
-**Exception — MCP-only features:** `elicit_name` and MCP resources/prompts have no
-CLI equivalent. Elicitation requires a live MCP client interaction (the server asks
-the user for input mid-call via `peer.elicit()`); that interaction model does not
-translate to a one-shot CLI call. Resources and prompts are MCP protocol concepts
-with no CLI analogue.
+Every production MCP action must also be reachable from the CLI, except protocol
+concepts such as MCP resources/prompts and elicitation-only flows. Current
+production action families:
 
-| Service Method | MCP Action | CLI Command | Notes |
-|---|---|---|---|
-| `service.greet(name)` | `example(action="greet", name="...")` | `example greet [--name N]` | `name` optional in both |
-| `service.echo(message)` | `example(action="echo", message="...")` | `example echo --message <msg>` | `message` required in both |
-| `service.status()` | `example(action="status")` | `example status` | |
-| _(MCP client interaction)_ | `example(action="elicit_name")` | _(MCP-only — no CLI equivalent)_ | Requires elicitation-capable client |
-| _(MCP elicitation wizard)_ | `example(action="scaffold_intent")` | _(MCP-only — no CLI equivalent)_ | Combines elicitation + skill handoff; no one-shot CLI equivalent |
-| _(built-in)_ | `example(action="help")` | `example --help` | MCP returns structured JSON; CLI prints usage |
+- `flux docker`: `info`, `df`, `images`, `networks`, `volumes`, `pull`, `build`,
+  `rmi`, `prune`
+- `flux container`: `list`, `inspect`, `logs`, `stats`, `top`, `search`,
+  `start`, `stop`, `restart`, `pause`, `resume`, `pull`, `recreate`, `exec`
+- `flux host`: `status`, `info`, `uptime`, `resources`, `services`, `network`,
+  `mounts`, `ports`, `doctor`
+- `flux compose`: `list`, `status`, `up`, `down`, `restart`, `recreate`,
+  `logs`, `build`, `pull`, `refresh`
+- `scout`: `nodes`, `peek`, `find`, `ps`, `df`, `delta`, `exec`, `emit`, `beam`,
+  `zfs`, `logs`
+- `flux help` and `scout help`
 
-**TEMPLATE:** Replace this table with your service's actual actions when you adapt
-the template. The rule is: one row per service method, with both the MCP action name
-and the CLI subcommand/flag documented.
+Run `cargo test --locked --test parity` after action-surface changes.
 
 ## Plugin versioning
 
-Plugin manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`) do **not** contain a `version` field. The marketplace derives the version from the git commit SHA on every push — adding an explicit version causes every push to be treated as a new version and creates duplicate entries. Do not add `version` to any plugin manifest and do not run `scripts/bump-version.sh` targets against plugin manifests.
+Plugin manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+`gemini-extension.json`) do not contain a `version` field. The marketplace
+derives versions from git commits. Do not add `version` or run version-bump
+scripts against plugin manifests.
 
 ## Common gotchas
 
-- **Stdio mode suppresses logs** — `main.rs` sets log level to `warn` in stdio mode so JSON-RPC is not corrupted by log lines on stdout.
-- **`config.toml` is a template file** — it still contains `unraid-mcp` values; update it when adapting this template.
-- **Scope checks run in `rmcp_server.rs`**, not in `tools.rs`. `tools.rs` only dispatches.
-- **`help` action is public** — `required_scope_for("help")` returns `None`. All other actions require at least `example:read`.
-- **Default port is 40080** — set in `default_mcp_port()` in `config.rs`. Override with `EXAMPLE_MCP_PORT`.
-- **`elicit_name` is MCP-only** — elicitation requires a live client connection; it cannot be invoked from the CLI. This is the one intentional parity exception.
-- **`watch`, `serve`, and `doctor` are CLI infrastructure** — they are not MCP actions and have no parity requirement. `watch` polls `/health` and emits state-change lines to stdout (used by the plugin monitor). `serve` starts the HTTP server. `doctor` runs pre-flight checks. None belong in the MCP parity table.
-
+- Stdio mode lowers log verbosity so JSON-RPC on stdout is not corrupted.
+- `help` is public; all non-help actions require at least `synapse:read`.
+- `watch`, `serve`, `mcp`, `doctor`, and `setup` are CLI infrastructure, not MCP
+  production actions.
+- `scout exec` uses an allowlist and execvp semantics; no shell metacharacters.
+- `container exec` takes an argv array and runs inside the target container.
+- Read operations may fan out when `host` is omitted; destructive operations
+  require explicit targets and confirmation.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker

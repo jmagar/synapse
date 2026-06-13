@@ -2,13 +2,13 @@
 title: "Rust Build Setup"
 doc_type: "guide"
 status: "active"
-owner: "rmcp-template"
+owner: "synapse2"
 audience:
   - "contributors"
   - "agents"
 scope: "family"
 source_of_truth: true
-last_reviewed: "2026-05-15"
+last_reviewed: "2026-06-13"
 ---
 
 # Rust Build Setup
@@ -169,8 +169,9 @@ Some repos intentionally diverge from the global config for documented reasons:
 | `syslog-mcp` | `build.target-dir = ".cache/cargo"` | Keeps Cargo artifacts out of the repo root so Docker `COPY` layers and bind mounts don't need to exclude `./target` |
 | `lab` | `build.incremental = false` | `lab` supports sccache; sccache and incremental compilation are mutually exclusive because incremental produces non-deterministic intermediate files |
 
-If you add a new legitimate per-repo override, document it in the repo's
-`docs/RUST.md` and add a row to this table in rmcp-template's `docs/RUST.md`.
+If you add a new legitimate per-repo override, document it in this file and in
+the family-level `docs/RUST.md` in `rmcp-template` if the rule should apply to
+future servers too.
 
 ---
 

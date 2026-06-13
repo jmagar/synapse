@@ -1,8 +1,8 @@
 # =============================================================================
-# config.synapse2.toml — Annotated template of all config.toml fields
+# config.example.toml — Annotated Synapse2 config.toml reference
 #
-# TEMPLATE: This file documents every available configuration option.
-#           Copy it to config.toml and adjust for your deployment.
+# This file documents the non-secret configuration options Synapse2 reads from
+# config.toml. Copy it to config.toml and adjust for your deployment.
 #
 #           config.toml holds non-secret defaults. Secrets and URLs go in .env.
 #           See .env.example for the secrets side of the split.
@@ -16,70 +16,54 @@
 # Environment variables ALWAYS take priority over config.toml values.
 # Naming:
 #   SYNAPSE_MCP_*  → [mcp] section  (server config)
-#   SYNAPSE_API_*  → upstream service process env
-#
-# TEMPLATE: Replace all "synapse2" / "EXAMPLE" references with your service name.
+#   SYNAPSE_API_*  → optional upstream service process env
 # =============================================================================
 
-# ── Upstream service ──────────────────────────────────────────────────────────
-# Upstream URLs and credentials are process env only. Set them in .env:
-#   SYNAPSE_API_URL=https://api.synapse2.com/v1
-#   SYNAPSE_API_KEY=...
-#
-# Full base URL examples:
-#   REST synapse2:    https://api.synapse2.com/v1
-#   GraphQL synapse2: https://graphql.synapse2.com/graphql
-#   Local synapse2:   http://192.168.1.100:8080
+# ── Optional upstream integration env ─────────────────────────────────────────
+# SYNAPSE_API_URL and SYNAPSE_API_KEY are loaded when present for integrations
+# that need an upstream HTTP API. Flux and Scout do not require them.
 
 # ── MCP HTTP server ───────────────────────────────────────────────────────────
-# TEMPLATE: Adjust host and port for your deployment.
 [mcp]
 
 # Bind host for the MCP HTTP server.
 # SYNAPSE_MCP_HOST env var overrides this.
 #   0.0.0.0   → accept connections from all interfaces (for Docker, reverse proxy)
 #   127.0.0.1 → loopback only (safest for local dev; no auth required)
-# TEMPLATE: Leave as 0.0.0.0 for Docker deployments. By default, non-loopback
-#            binds require bearer/OAuth auth; trusted gateways may explicitly opt
-#            into upstream-enforced auth with SYNAPSE_NOAUTH=true.
+# Leave as 0.0.0.0 for Docker deployments. By default, non-loopback binds require
+# bearer/OAuth auth; trusted gateways may explicitly opt into upstream-enforced
+# auth with SYNAPSE_NOAUTH=true.
 host = "0.0.0.0"
 
 # Bind port for the MCP HTTP server.
 # SYNAPSE_MCP_PORT env var overrides this.
-# TEMPLATE: Change to your service's assigned port. See Pattern §19:
-#   unraid-mcp:   6970
-#   gotify-mcp:   9158
-#   unifi-mcp:    7474
-#   tailscale-mcp: 7575
-#   apprise-mcp:  8765
-#   synapse2: 3000
+# Synapse2's assigned port is 40080.
 port = 40080
 
 # Server name advertised to MCP clients in the tools/list response.
 # SYNAPSE_MCP_SERVER_NAME env var overrides this.
-# TEMPLATE: Replace "synapse2" with your service name (e.g. "unraid-mcp").
 server_name = "synapse2"
 
 # Disable authentication entirely.
 # ONLY safe when host = "127.0.0.1" (loopback — your machine only).
 # SYNAPSE_MCP_NO_AUTH env var overrides this.
-# TEMPLATE: Never set to true in production. Use just dev for local no-auth mode.
+# Never set to true in production. Use just dev for local no-auth mode.
 # no_auth = false
 
 # Static bearer token for /mcp authentication.
 # SYNAPSE_MCP_TOKEN env var overrides this.
-# TEMPLATE: ALWAYS set via env var, never in config.toml.
+# Always set via env var, never in config.toml.
 #   Generate with: openssl rand -hex 32   or   just gen-token
 # api_token = ""
 
 # Extra Host header values allowed by the RMCP host-validation middleware.
 # SYNAPSE_MCP_ALLOWED_HOSTS env var (comma-separated) overrides this.
-# TEMPLATE: Add your reverse proxy hostname or local DNS name.
-# allowed_hosts = ["myservice.synapse2.com", "myservice.lan"]
+# Add your reverse proxy hostname or local DNS name.
+# allowed_hosts = ["synapse2.example.com", "synapse2.lan"]
 
 # Extra CORS origins for browser-based MCP clients.
 # SYNAPSE_MCP_ALLOWED_ORIGINS env var (comma-separated) overrides this.
-# TEMPLATE: Add your frontend origin if building a browser-based client.
+# Add your frontend origin if building a browser-based client.
 # SECURITY NOTE: By default, localhost and 127.0.0.1 are always allowed.
 #                Add specific client origins (e.g., https://claude.ai) in production.
 #                CORS is defense-in-depth; auth (bearer token or OAuth) is the
@@ -94,22 +78,21 @@ server_name = "synapse2"
 # allow_destructive = false
 
 # ── OAuth / JWT authentication ────────────────────────────────────────────────
-# TEMPLATE: This sub-section configures the optional OAuth + JWT auth layer.
-#           Activate it by setting SYNAPSE_MCP_AUTH_MODE=oauth in .env.
-#           Leave all sensitive values (client_id, client_secret, public_url)
-#           in .env — never in this file.
+# This sub-section configures the optional OAuth + JWT auth layer. Activate it
+# by setting SYNAPSE_MCP_AUTH_MODE=oauth in .env. Leave all sensitive values
+# (client_id, client_secret, public_url) in .env — never in this file.
 [mcp.auth]
 
 # Authentication mode: "bearer" (default) or "oauth".
 # SYNAPSE_MCP_AUTH_MODE env var overrides this.
-# TEMPLATE: Start with "bearer" for simplicity. Switch to "oauth" when you
-#           need per-user identity and Google account-gated access.
+# Start with "bearer" for simplicity. Switch to "oauth" when you need per-user
+# identity and Google account-gated access.
 mode = "bearer"
 
 # Public URL of this MCP server (required in OAuth mode).
 # SYNAPSE_MCP_PUBLIC_URL env var overrides this.
-# TEMPLATE: Must be reachable from Claude clients. Set in .env, not here.
-# public_url = "https://myservice.synapse2.com"
+# Must be reachable from MCP clients. Set in .env, not here.
+# public_url = "https://synapse2.example.com"
 
 # Google OAuth 2.0 credentials — ALWAYS set via .env, never here.
 # SYNAPSE_MCP_GOOGLE_CLIENT_ID env var overrides this.
@@ -119,59 +102,59 @@ mode = "bearer"
 
 # Bootstrap admin email — the first Google account allowed to authenticate.
 # SYNAPSE_MCP_AUTH_ADMIN_EMAIL env var overrides this.
-# TEMPLATE: Set to your Google account email. Additional accounts are managed by
-#           the OAuth admin store after bootstrap.
+# Set to your Google account email. Additional accounts are managed by the OAuth
+# admin store after bootstrap.
 admin_email = ""
 
 # Path to the SQLite database for OAuth sessions and client registrations.
 # SYNAPSE_MCP_AUTH_SQLITE_PATH env var overrides this.
-# TEMPLATE: In Docker, /data is bind-mounted from ~/.synapse2 on the host.
-#           For bare-metal, change to ~/.synapse2/auth.db.
+# In Docker, /data is bind-mounted from ~/.synapse2 on the host. For bare-metal,
+# change to ~/.synapse2/auth.db.
 sqlite_path = "/data/auth.db"
 
 # Path to the RS256 private key for JWT signing.
 # SYNAPSE_MCP_AUTH_KEY_PATH env var overrides this.
 # Auto-generated on first run if it doesn't exist.
-# TEMPLATE: In Docker, /data is bind-mounted from ~/.synapse2 on the host.
-#           For bare-metal, change to ~/.synapse2/auth-jwt.pem.
+# In Docker, /data is bind-mounted from ~/.synapse2 on the host. For bare-metal,
+# change to ~/.synapse2/auth-jwt.pem.
 key_path = "/data/auth-jwt.pem"
 
 # How long issued access tokens are valid (seconds).
 # SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS env var overrides this.
-# TEMPLATE: 3600 (1 hour) is the standard. Reduce for higher security environments.
+# 3600 (1 hour) is the standard. Reduce for higher security environments.
 access_token_ttl_secs = 3600
 
 # How long refresh tokens are valid (seconds).
 # SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS env var overrides this.
-# TEMPLATE: 2592000 = 30 days. Increase for "remember me" UX; decrease for
-#            tighter security. Claude Desktop re-authenticates when this expires.
+# 2592000 = 30 days. Increase for "remember me" UX; decrease for tighter
+# security. MCP clients re-authenticate when this expires.
 refresh_token_ttl_secs = 2592000
 
 # How long OAuth authorization codes are valid (seconds).
 # SYNAPSE_MCP_AUTH_CODE_TTL_SECS env var overrides this.
-# TEMPLATE: 300 (5 minutes) is the OAuth spec default. Reduce to 60 for paranoid setups.
+# 300 (5 minutes) is the OAuth spec default. Reduce to 60 for stricter setups.
 auth_code_ttl_secs = 300
 
 # Rate limit: max new client registrations per minute per IP.
 # SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE env var overrides this.
-# TEMPLATE: 10 is reasonable for a private server. Reduce to 1-3 for strict control.
+# 10 is reasonable for a private server. Reduce to 1-3 for strict control.
 register_rpm = 10
 
 # Rate limit: max authorization attempts per minute per IP.
 # SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE env var overrides this.
-# TEMPLATE: 60 allows normal OAuth flows. Reduce if you see abuse.
+# 60 allows normal OAuth flows. Reduce if you see abuse.
 authorize_rpm = 60
 
 # When OAuth is active, disable the static bearer token (SYNAPSE_MCP_TOKEN).
 # SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH env var overrides this.
-# TEMPLATE: Set to false if you want both OAuth and static token active simultaneously.
-#           Useful during migration from bearer to OAuth.
+# Set to false if you want both OAuth and static token active simultaneously.
+# Useful during migration from bearer to OAuth.
 disable_static_token_with_oauth = true
 
 # Extra redirect URIs allowed during OAuth.
 # SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS env var (comma-separated) overrides this.
 # claude.ai redirect URIs are included by default.
-# TEMPLATE: Add your MCP client's redirect URIs if they differ from claude.ai's.
+# Add your MCP client's redirect URIs if they differ from claude.ai's.
 allowed_client_redirect_uris = []
 
 # ── Host topology (the SSH / Docker fleet) ────────────────────────────────────
@@ -180,7 +163,7 @@ allowed_client_redirect_uris = []
 #
 #   1. SYNAPSE_HOSTS_CONFIG env — inline JSON array of host objects.
 #   2. SYNAPSE_CONFIG_FILE env  — path to a JSON file ({ "hosts": [ ... ] }).
-#   3. ./synapse.config.json, then ~/.config/synapse-mcp/config.json, etc.
+#   3. ./synapse.config.json, then ~/.config/synapse2/hosts.json, etc.
 #   4. ~/.ssh/config            — AUTO-DISCOVERED. Every concrete (non-wildcard)
 #                                 Host block with a HostName becomes an SSH host,
 #                                 inheriting User / Port / IdentityFile. This is

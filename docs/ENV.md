@@ -106,7 +106,7 @@ SYNAPSE_MCP_TOKEN=your_bearer_token_here
 # SYNAPSE_MCP_AUTH_ADMIN_EMAIL=admin@example.com
 
 # Host topology
-# SYNAPSE_CONFIG_FILE=/home/synapse/.synapse2/hosts.toml
+# SYNAPSE_CONFIG_FILE=/home/synapse/.synapse2/hosts.json
 
 # Docker runtime
 DOCKER_GID=999

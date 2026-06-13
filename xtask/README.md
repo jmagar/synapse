@@ -42,7 +42,8 @@ just dist
 
 Respects `CARGO_TARGET_DIR` if set. After running, commit the updated `bin/` pointer and push to update LFS.
 
-**TEMPLATE**: Update `BINARY_NAME` in `xtask/src/main.rs` to match the `[[bin]] name` in your `Cargo.toml`.
+For Synapse2 this copies the `synapse` binary, matching the `[[bin]]` entry in
+`Cargo.toml`.
 
 ---
 
@@ -100,13 +101,14 @@ just check-env
 Example output:
 
 ```
-[OK]      EXAMPLE_MCP_TOKEN   — Static bearer token for MCP auth
-[MISSING] EXAMPLE_API_KEY     — Upstream service API key (required)
+[OK]      SYNAPSE_MCP_TOKEN   — Static bearer token for MCP auth
+[OK]      SYNAPSE_MCP_PORT    — Optional MCP HTTP port
 
-Error: 1 required variable(s) missing. Copy .env.example to .env and fill in the values.
+Environment check complete.
 ```
 
-**TEMPLATE**: Update `REQUIRED_VARS` and `OPTIONAL_VARS` in `xtask/src/main.rs` for your service. The template ships with no required variables (the stub works without credentials).
+Synapse2 has no required upstream API credential. `SYNAPSE_MCP_TOKEN` is required
+only for non-loopback bearer-mode HTTP deployments.
 
 ---
 
