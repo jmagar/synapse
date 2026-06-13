@@ -274,6 +274,92 @@ async fn resolve_compose_project_reports_project_without_config_file() {
 }
 
 #[tokio::test]
+async fn compose_operations_report_missing_project_before_exec() {
+    let mock = Arc::new(MockComposeExec::empty());
+    let mut flux = flux_with_hosts(vec![compose_host("tootie")]);
+    flux.compose = Arc::new(ComposeDiscovery::new(mock.clone()));
+
+    let status = flux
+        .compose_status("tootie", "missing", Some("web"))
+        .await
+        .unwrap_err();
+    let up = flux.compose_up("tootie", "missing").await.unwrap_err();
+    let down = flux
+        .compose_down(
+            "tootie",
+            "missing",
+            DownArgs {
+                remove_volumes: false,
+                force: false,
+            },
+            &DenyConfirmer,
+        )
+        .await
+        .unwrap_err();
+    let restart = flux
+        .compose_restart("tootie", "missing", &DenyConfirmer)
+        .await
+        .unwrap_err();
+    let recreate = flux
+        .compose_recreate("tootie", "missing", &DenyConfirmer)
+        .await
+        .unwrap_err();
+    let logs = flux
+        .compose_logs(
+            "tootie",
+            "missing",
+            ComposeLogOptions {
+                lines: Some(10),
+                since: Some("1h".to_owned()),
+                service: Some("web".to_owned()),
+            },
+        )
+        .await
+        .unwrap_err();
+    let build = flux
+        .compose_build("tootie", "missing", Some("web"))
+        .await
+        .unwrap_err();
+    let pull = flux
+        .compose_pull("tootie", "missing", Some("web"))
+        .await
+        .unwrap_err();
+
+    for err in [status, up, down, restart, recreate, logs, build, pull] {
+        assert!(err
+            .to_string()
+            .contains("compose project \"missing\" not found"));
+    }
+    assert!(
+        mock.calls() > 0,
+        "project resolution should query discovery"
+    );
+}
+
+#[tokio::test]
+async fn compose_down_rejects_remove_volumes_without_force_before_discovery() {
+    let mock = Arc::new(MockComposeExec::empty());
+    let mut flux = flux_with_hosts(vec![compose_host("tootie")]);
+    flux.compose = Arc::new(ComposeDiscovery::new(mock.clone()));
+
+    let err = flux
+        .compose_down(
+            "tootie",
+            "missing",
+            DownArgs {
+                remove_volumes: true,
+                force: false,
+            },
+            &DenyConfirmer,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("force=true"));
+    assert_eq!(mock.calls(), 0, "validation should run before discovery");
+}
+
+#[tokio::test]
 async fn compose_refresh_invalidates_cached_discovery_for_one_host() {
     let mock = Arc::new(MockComposeExec::with_scanned_project(
         "myapp",
