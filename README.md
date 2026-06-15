@@ -156,6 +156,18 @@ SYNAPSE_MCP_PORT=40080
 SYNAPSE_MCP_TOKEN=change-me
 ```
 
+Key environment variables:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `SYNAPSE_MCP_HOST` | `127.0.0.1` | Bind host for HTTP transport. |
+| `SYNAPSE_MCP_PORT` | `40080` | Bind port for HTTP transport. |
+| `SYNAPSE_MCP_TOKEN` | unset | Static bearer token for auth. |
+| `SYNAPSE_MCP_NO_AUTH` | `false` | Disable auth for loopback development only. |
+| `SYNAPSE_NOAUTH` | `false` | Trusted-gateway no-auth mode for non-loopback deployments. |
+| `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | `false` | Skip destructive-operation confirmation prompts (loopback only). |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Maximum simultaneous in-flight requests on `/mcp` and `/v1/synapse2`. Excess requests are queued, not rejected. Set to `0` to disable. `/health` and `/status` are exempt. |
+
 See `.env.example` for the full list of variables and `docs/CONFIG.md` for auth
 configuration details.
 

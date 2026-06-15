@@ -158,6 +158,7 @@ that override on non-loopback binds.
 | `SYNAPSE_MCP_NO_AUTH` | `false` | Disable auth for loopback dev only. |
 | `SYNAPSE_NOAUTH` | `false` | Trusted gateway no-auth mode. |
 | `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | `false` | Skip destructive confirmation prompts; loopback only. |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Global concurrency cap on `/mcp` and `/v1/synapse2`; excess requests queued. `0` = disable. `/health`/`/status` exempt. |
 | `SYNAPSE_MCP_TOKEN` | unset | Static bearer token. |
 | `SYNAPSE_MCP_ALLOWED_HOSTS` | unset | Extra accepted Host header values. |
 | `SYNAPSE_MCP_ALLOWED_ORIGINS` | unset | Extra CORS origins. |

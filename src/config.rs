@@ -32,7 +32,8 @@ pub struct Config {
 }
 
 /// MCP HTTP server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// `Debug` is hand-written (below) to redact `api_token`; do not re-derive it.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpConfig {
     /// Bind host (SYNAPSE_MCP_HOST). Default: `127.0.0.1` (loopback).
@@ -77,6 +78,25 @@ pub struct McpConfig {
     pub max_concurrency: usize,
     /// OAuth sub-config (nested under `[mcp.auth]` in config.toml).
     pub auth: AuthConfig,
+}
+
+impl std::fmt::Debug for McpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("server_name", &self.server_name)
+            .field("no_auth", &self.no_auth)
+            .field("trusted_gateway", &self.trusted_gateway)
+            .field("allow_destructive", &self.allow_destructive)
+            // Redact the static bearer token — never log secrets.
+            .field("api_token", &self.api_token.as_ref().map(|_| "[REDACTED]"))
+            .field("allowed_hosts", &self.allowed_hosts)
+            .field("allowed_origins", &self.allowed_origins)
+            .field("max_concurrency", &self.max_concurrency)
+            .field("auth", &self.auth)
+            .finish()
+    }
 }
 
 impl McpConfig {

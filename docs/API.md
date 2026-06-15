@@ -4,7 +4,7 @@
 commands. MCP and CLI are the primary surfaces and expose the full 59-action set.
 
 The REST endpoint at `POST /v1/synapse2` is a thin compatibility shim. It routes
-only 13 of the 59 actions: `help`, `scout.nodes`, `scout.peek`, `scout.exec`,
+only 14 of the 59 actions: `help`, `scout.nodes`, `scout.peek`, `scout.exec`,
 `flux.container.list`, and the nine `flux.docker.*` subactions
 (`info`, `df`, `images`, `networks`, `volumes`, `pull`, `build`, `rmi`,
 `prune`). All other actions return `UnknownAction` over REST. Use MCP or CLI for

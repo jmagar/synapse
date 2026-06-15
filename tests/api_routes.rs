@@ -198,6 +198,56 @@ async fn rest_destructive_action_confirmation_denied_returns_403_not_500() {
     );
 }
 
+// Scout destructive ops must also map ConfirmationDenied → 403 (the typed
+// error is preserved through the deadline wrapper rather than stringified).
+#[tokio::test]
+async fn rest_scout_exec_confirmation_denied_returns_403() {
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        // `ls` is allowlisted, so it passes command validation and reaches the
+        // DenyConfirm gate (scout exec is confirmation-gated).
+        Some(json!({
+            "action": "scout.exec",
+            "params": { "host": "local", "path": "/tmp", "command": "ls" }
+        })),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "scout.exec with DenyConfirm must return 403, not 500; body={body}"
+    );
+}
+
+// Narrowness guard: a non-confirmation service error must NOT be mapped to 403
+// (otherwise the 403 arm would mask genuine failures as policy denials).
+#[tokio::test]
+async fn rest_non_confirmation_error_is_not_403() {
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        // `rm` is not allowlisted: command validation fails BEFORE the confirmer
+        // gate, so this is not a ConfirmationDenied and must not return 403.
+        Some(json!({
+            "action": "scout.exec",
+            "params": { "host": "local", "path": "/tmp", "command": "rm" }
+        })),
+    )
+    .await;
+
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a non-confirmation error must not be reported as 403; body={body}"
+    );
+}
+
 #[tokio::test]
 async fn oversized_body_returns_413() {
     let app = server::router(loopback_state());

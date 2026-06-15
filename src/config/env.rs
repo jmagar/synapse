@@ -22,10 +22,12 @@ pub fn load_dotenv_environment() -> anyhow::Result<()> {
     }
     for (key, value) in entries {
         if std::env::var_os(&key).is_none() {
-            // SAFETY: called once at single-threaded startup (before the Tokio
-            // runtime or any other threads are spawned), so there is no
-            // concurrent env access. Edition 2024 marks `set_var` unsafe to
-            // guard against the multi-threaded case, which does not apply here.
+            // SAFETY: `load_dotenv_environment` is called from the synchronous
+            // `main()` BEFORE the Tokio runtime is built (see `src/main.rs`), so
+            // no other threads exist and nothing reads the environment
+            // concurrently. Edition 2024 marks `set_var` unsafe to guard against
+            // the multi-threaded case, which cannot occur at this point.
+            // Invariant: this must not be called after the runtime starts.
             unsafe {
                 std::env::set_var(key, value);
             }

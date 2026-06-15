@@ -90,7 +90,21 @@ async fn peek_remote(host: &HostConfig, executor: &dyn SshExecutor, path: &str) 
     // Try stat to determine file vs directory.
     // We request both type (%F) and size (%s) in one call, then check for
     // symlinks BEFORE reading (S-M1 remote symlink TOCTOU guard).
-    let stat_out = executor.exec(host, "stat", &["-c", "%F\t%s", path]).await?;
+    //
+    // `env LC_ALL=C` forces the locale-independent "symbolic link" string (a
+    // translated locale would otherwise slip a symlink past the `==` check).
+    // We also REQUIRE stat to succeed: an empty stdout from a failed stat
+    // (busybox without GNU stat, EPERM, …) must not silently bypass the guard.
+    let stat_out = executor
+        .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F\t%s", path])
+        .await?;
+    if stat_out.exit_code != Some(0) {
+        bail!(
+            "peek: cannot stat {path} (exit {:?}): {}",
+            stat_out.exit_code,
+            stat_out.stderr.trim()
+        );
+    }
     let (kind, size_bytes) = parse_stat_kind_size(stat_out.stdout.trim());
 
     // Reject symbolic links on the remote side.
@@ -321,7 +335,18 @@ async fn read_remote_file(
     } else {
         validate_scout_read_path(host, path)?;
         // Remote symlink guard (S-M1): stat the path via SSH before reading.
-        let stat_out = executor.exec(host, "stat", &["-c", "%F", path]).await?;
+        // `env LC_ALL=C` keeps the "symbolic link" string locale-independent;
+        // a failed stat must fail closed (not silently bypass the guard).
+        let stat_out = executor
+            .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F", path])
+            .await?;
+        if stat_out.exit_code != Some(0) {
+            bail!(
+                "read_remote_file: cannot stat {path} (exit {:?}): {}",
+                stat_out.exit_code,
+                stat_out.stderr.trim()
+            );
+        }
         let file_type = stat_out.stdout.trim();
         if file_type == "symbolic link" {
             bail!("read_remote_file: path is a symbolic link, which is not permitted: {path}");

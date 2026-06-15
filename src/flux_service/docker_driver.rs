@@ -13,6 +13,7 @@ use super::{
     docker::{self, BuildArgs, PruneTarget},
     flatten_list_outcome, flatten_scalar_outcome,
 };
+use crate::docker_client::is_transport_dead;
 use crate::elicitation_gate::Confirmer;
 use crate::fanout::fanout;
 use crate::scout;
@@ -38,7 +39,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 docker::info_on_host(client.as_ref(), &h.name)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -55,7 +61,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 docker::df_on_host(client.as_ref(), &h.name)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -72,7 +83,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 docker::images_on_host(client.as_ref(), &h.name, dangling_only)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -89,7 +105,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 docker::networks_on_host(client.as_ref(), &h.name)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -106,7 +127,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 docker::volumes_on_host(client.as_ref(), &h.name)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;

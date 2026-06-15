@@ -24,8 +24,8 @@ use super::{
 ///
 /// `Instant` is not representable as a number directly, so we measure all
 /// timestamps as nanoseconds elapsed *since this anchor*. The anchor is
-/// initialised once at program start (via `std::sync::OnceLock`) and remains
-/// stable for the lifetime of the process.
+/// initialised lazily on first use (via `std::sync::OnceLock`) and remains
+/// stable for the rest of the process lifetime.
 fn instant_epoch() -> Instant {
     use std::sync::OnceLock;
     static EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -224,7 +224,7 @@ impl SshPool {
         // `get_or_try_init` guarantees exactly one `connect()` per cell across
         // concurrent callers. Additional callers await the shared future.
         let exec_permits = self.exec_permits;
-        let pooled = cell
+        let pooled = match cell
             .get_or_try_init(|| async move {
                 let session = connect(host).await?;
                 Ok::<Arc<PooledSession>, anyhow::Error>(Arc::new(PooledSession {
@@ -233,7 +233,20 @@ impl SshPool {
                     last_used_nanos: AtomicU64::new(instant_to_nanos(Instant::now())),
                 }))
             })
-            .await?;
+            .await
+        {
+            Ok(pooled) => pooled,
+            Err(e) => {
+                // Connect failed: `OnceCell` resets itself, but the empty cell
+                // would linger in the map (`evict_idle` skips uninitialised
+                // cells). Drop it so `len()`/metrics don't count a ghost entry
+                // and the next checkout starts fresh — but only if it's still
+                // our uninitialised cell (another task may have raced a success).
+                self.sessions
+                    .remove_if(&key, |_, c| c.get().is_none() && Arc::ptr_eq(c, &cell));
+                return Err(e);
+            }
+        };
 
         pooled.touch();
         Ok(Arc::clone(pooled))

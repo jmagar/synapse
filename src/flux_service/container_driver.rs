@@ -37,7 +37,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 container_read::list_on_host(client.as_ref(), &h.name, &filters)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -56,7 +61,12 @@ impl FluxService {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 container_read::list_on_host(client.as_ref(), &h.name, &filters)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -103,7 +113,12 @@ impl FluxService {
                 let containers =
                     container_read::list_on_host(client.as_ref(), &h.name, &ListFilters::default())
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| {
+                            if is_transport_dead(&e) {
+                                clients.invalidate(&h);
+                            }
+                            e.to_string()
+                        })?;
                 let mut stats = Vec::new();
                 for c in &containers {
                     if let Some(id) = c.get("id").and_then(Value::as_str)

@@ -40,7 +40,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
-use crate::elicitation_gate::{ConfirmationDenied, Confirmer};
+use crate::elicitation_gate::Confirmer;
 use crate::fanout::{FanoutOutcome, fanout};
 use crate::flux_service::host::is_local_host;
 use crate::ssh::SshExecutor;
@@ -80,10 +80,7 @@ pub async fn exec(
         host.name,
         path.map(|p| format!(" path={p}")).unwrap_or_default()
     );
-    confirmer
-        .require("scout:exec", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:exec", &details).await?;
 
     let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
@@ -173,10 +170,7 @@ pub async fn emit(
         })
         .collect();
     let details = format!("command={command} targets={}", target_labels.join(", "));
-    confirmer
-        .require("scout:emit", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:emit", &details).await?;
 
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(EMIT_DEFAULT_TIMEOUT_SECS));
 
@@ -323,10 +317,7 @@ pub async fn beam(
     let dest_label = format!("{}:{}", dest_host.name, dest_path);
 
     let details = format!("{source_label} → {dest_label}");
-    confirmer
-        .require("scout:beam", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:beam", &details).await?;
 
     // Build scp args (no shell — args are typed, not interpolated).
     // scp format: scp [user@]host:path [user@]host:path

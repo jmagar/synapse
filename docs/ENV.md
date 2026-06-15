@@ -42,6 +42,7 @@ Synapse2 uses `SYNAPSE_*` variables for service configuration and
 | `SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE` | `60` | OAuth authorization rate limit. |
 | `SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` | `true` | Disable static bearer tokens when OAuth is active. |
 | `SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS` | unset | Extra OAuth redirect URI patterns (comma-separated). |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Maximum simultaneous in-flight requests on `/mcp` and `/v1/synapse2`. Excess requests are queued (back-pressure), not rejected. Set to `0` to disable. `/health` and `/status` are exempt. This is a global cap across all clients, not a per-client rate limit. |
 
 ## Host topology
 

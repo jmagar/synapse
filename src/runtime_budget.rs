@@ -35,7 +35,8 @@ where
         // Propagate the original error unchanged (type + message preserved) so
         // downstream `downcast_ref` checks — e.g. `is_confirmation_denied` mapping
         // a destructive denial to HTTP 403 — still see the typed error instead of a
-        // stringified copy. (The deadline only rewrites the message on timeout.)
+        // an opaque anyhow wrapper that loses the concrete type. (The deadline
+        // only rewrites the message on timeout.)
         Ok(Err(error)) => Err(error.into()),
         Err(_) => Err(anyhow!("{label} timed out after {}s", timeout.as_secs())),
     }
@@ -160,8 +161,9 @@ fn cap_value_inner(value: &mut Value) {
 /// Return `true` when a JSON object key names a large textual field that should
 /// be byte-capped before MCP/REST rendering.
 ///
-/// Uses a `match` expression so the compiler emits a jump table rather than a
-/// linear scan.
+/// Uses a `match` expression over string literals, which the compiler can
+/// optimize (e.g. length/prefix dispatch) better than the bounds-checked
+/// `[&str]::contains` slice scan it replaced.
 fn should_cap_text_field(key: &str) -> bool {
     matches!(
         key,

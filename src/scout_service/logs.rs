@@ -10,7 +10,7 @@
 //! - `syslog`  → `tail -n <lines> /var/log/syslog` (fallback: `/var/log/messages`)
 //! - `journal` → `journalctl -n <lines> --no-pager [-u <unit>] [-p <priority>]
 //!                             [--since <since>] [--until <until>]`
-//! - `dmesg`   → `dmesg --color=never -l <level>` (permission errors → helpful message)
+//! - `dmesg`   → `dmesg --color=never --lines <n>` (permission errors → helpful message)
 //! - `auth`    → `tail -n <lines> /var/log/auth.log` (fallback: `/var/log/secure`)
 //!
 //! # Security (S-H3)
@@ -20,7 +20,8 @@
 //!
 //! - `unit`     : no leading `-`, no NUL, max 256 chars.
 //! - `priority` : must be one of the eight syslog level names or digits 0-7.
-//! - `since`/`until` : no leading `--`, no NUL, max 64 chars.
+//! - `since`/`until` : no option-like leading `-` (relative times like `-1h`
+//!   are allowed), no NUL, max 64 chars.
 //!
 //! This prevents flag-smuggling (e.g. `unit = "-M container"`) even though the
 //! args are passed via execvp (not a shell) — argv position matters to
@@ -96,8 +97,17 @@ fn validate_journal_priority(priority: &str) -> Result<()> {
 /// - NUL bytes
 /// - values longer than `TIME_FILTER_MAX_LEN`
 fn validate_journal_time_filter(value: &str) -> Result<()> {
-    if value.starts_with("--") {
-        bail!("journal time filter must not start with `--` (got: {value:?})");
+    // Reject option-like values (`-b`, `--boot`) so a filter can never smuggle a
+    // journalctl flag, while still allowing systemd relative times like `-1h`
+    // (leading `-` followed by a digit).
+    let option_like = value.starts_with("--")
+        || (value.starts_with('-')
+            && !value[1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()));
+    if option_like {
+        bail!("journal time filter must not start with an option-like `-` (got: {value:?})");
     }
     if value.contains('\0') {
         bail!("journal time filter must not contain NUL bytes");
@@ -243,14 +253,11 @@ pub async fn journal(
 /// # Volume reduction (P-M7)
 ///
 /// `dmesg` can produce ~512 KB over SSH. We reduce transfer volume by passing
-/// `--level emerg,alert,crit,err,warn,notice,info,debug` (all levels, no
-/// filtering applied by default unless `grep` is non-empty) together with a
-/// line cap argument where supported. Unfortunately `dmesg --nlines` and
-/// `dmesg | tail -n` require shell composition, which violates the execvp
-/// invariant. Instead we pass a generous line cap through the `--lines` flag
-/// (supported on util-linux 2.21+). Older `dmesg` versions ignore `--lines`
-/// gracefully (they produce the full buffer) and the local tail still applies.
-/// This is a best-effort size reduction, not a hard cap at the exec layer.
+/// a generous line cap through the `--lines` flag (supported on util-linux
+/// 2.21+); older `dmesg` versions ignore `--lines` gracefully (they produce the
+/// full buffer) and the local tail still applies. `dmesg | tail -n` would
+/// require shell composition, which violates the execvp invariant, so this is a
+/// best-effort size reduction, not a hard cap at the exec layer.
 pub async fn dmesg(
     host: &HostConfig,
     executor: &dyn SshExecutor,
@@ -264,9 +271,8 @@ pub async fn dmesg(
     let fetch_lines = (lines.saturating_mul(4)).min(MAX_LINES * 2);
     let fetch_lines_s = fetch_lines.to_string();
 
-    // --level is available on util-linux dmesg and limits the ring-buffer
-    // entries transferred. --lines caps at the source when available.
-    // Both are passed as argv arguments (execvp-safe, no shell).
+    // --lines caps the ring-buffer entries at the source when available
+    // (util-linux 2.21+). Passed as argv arguments (execvp-safe, no shell).
     let args: Vec<&str> = vec!["--color=never", "--lines", &fetch_lines_s];
 
     let run_result = if is_local_host(host) {

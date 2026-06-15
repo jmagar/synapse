@@ -22,8 +22,20 @@ use synapse2::{
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Load `.env` into the process environment BEFORE starting the Tokio
+    // runtime. `std::env::set_var` is only sound while single-threaded; doing it
+    // here (no runtime, no worker threads, nothing reading the environment
+    // concurrently) keeps the `unsafe` in `load_dotenv_environment` actually safe.
+    load_dotenv_environment()?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     cli::install_color_from_args(&mut args)?;
 
@@ -38,8 +50,6 @@ async fn main() -> Result<()> {
         }
         _ => {}
     }
-
-    load_dotenv_environment()?;
 
     // Suppress logs in stdio/CLI mode — MCP clients communicate over stdio
     // and cannot tolerate log lines mixed into the JSON stream.

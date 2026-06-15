@@ -32,10 +32,9 @@ use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 // `tokio::sync::Semaphore` is already used extensively in this codebase
 // (fanout.rs, ssh/pool.rs) so there is no new dependency.
 
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tower::{Layer, Service};
 
 /// Boxed inner-service future produced by [`ConcurrencyLimitService::call`].
@@ -97,7 +96,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = ConcurrencyLimitFuture<S::Response, S::Error>;
+    type Future = BoxedServiceFuture<S::Response, S::Error>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -105,104 +104,23 @@ where
 
     fn call(&mut self, req: axum::http::Request<ReqBody>) -> Self::Future {
         let sem = Arc::clone(&self.semaphore);
-        // Box the inner future so ConcurrencyLimitFuture does not need F: Unpin.
-        let fut: BoxedServiceFuture<S::Response, S::Error> = Box::pin(self.inner.call(req));
-        ConcurrencyLimitFuture::Acquiring { sem, fut }
-    }
-}
-
-/// State machine future for [`ConcurrencyLimitService`].
-///
-/// Stores the inner future as `Pin<Box<dyn Future>>` so we do not require
-/// `F: Unpin` and avoid the need for `pin-project-lite` (not a direct dep).
-///
-/// States:
-/// - `Acquiring` — waiting for a semaphore permit; once acquired, transitions
-///   to `Running` while holding the permit for the lifetime of `fut`.
-/// - `Running` — inner future is being polled; permit is held until completion.
-/// - `Done` — inner future completed; poll must not be called again.
-enum ConcurrencyLimitFuture<R, E> {
-    Acquiring {
-        sem: Arc<Semaphore>,
-        fut: Pin<Box<dyn Future<Output = Result<R, E>> + Send + 'static>>,
-    },
-    Running {
-        _permit: OwnedSemaphorePermit,
-        fut: Pin<Box<dyn Future<Output = Result<R, E>> + Send + 'static>>,
-    },
-    Done,
-}
-
-impl<R, E> Future for ConcurrencyLimitFuture<R, E>
-where
-    R: Send + 'static,
-    E: Send + 'static,
-{
-    type Output = Result<R, E>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            match &mut *self {
-                ConcurrencyLimitFuture::Acquiring { sem, .. } => {
-                    // Try to acquire a permit without blocking the executor thread.
-                    // `try_acquire_owned` returns `Err(TryAcquireError::NoPermits)` when
-                    // the limit is reached — we schedule a wake-up by polling the async
-                    // acquire future.
-                    match sem.clone().try_acquire_owned() {
-                        Ok(permit) => {
-                            // Permit acquired; transition to Running.
-                            let old = std::mem::replace(&mut *self, ConcurrencyLimitFuture::Done);
-                            let ConcurrencyLimitFuture::Acquiring { sem: _, fut } = old else {
-                                unreachable!()
-                            };
-                            *self = ConcurrencyLimitFuture::Running {
-                                _permit: permit,
-                                fut,
-                            };
-                            // Fall through to poll the inner future immediately.
-                        }
-                        Err(_) => {
-                            // No permits available; register a waker via the async
-                            // acquire path so we are notified when a permit is released.
-                            let sem2 = sem.clone();
-                            let acquire_fut = sem2.acquire_owned();
-                            tokio::pin!(acquire_fut);
-                            match acquire_fut.poll(cx) {
-                                Poll::Ready(Ok(permit)) => {
-                                    let old =
-                                        std::mem::replace(&mut *self, ConcurrencyLimitFuture::Done);
-                                    let ConcurrencyLimitFuture::Acquiring { sem: _, fut } = old
-                                    else {
-                                        unreachable!()
-                                    };
-                                    *self = ConcurrencyLimitFuture::Running {
-                                        _permit: permit,
-                                        fut,
-                                    };
-                                    // Fall through.
-                                }
-                                Poll::Ready(Err(_)) => {
-                                    // Semaphore closed — should never happen since we
-                                    // hold an Arc to it.  Stay pending.
-                                    return Poll::Pending;
-                                }
-                                Poll::Pending => return Poll::Pending,
-                            }
-                        }
-                    }
-                }
-                ConcurrencyLimitFuture::Running { fut, .. } => match fut.as_mut().poll(cx) {
-                    Poll::Ready(result) => {
-                        *self = ConcurrencyLimitFuture::Done;
-                        return Poll::Ready(result);
-                    }
-                    Poll::Pending => return Poll::Pending,
-                },
-                ConcurrencyLimitFuture::Done => {
-                    panic!("ConcurrencyLimitFuture polled after completion")
-                }
-            }
-        }
+        // Standard tower clone-for-call: `poll_ready` readied `self.inner`, so
+        // move that readied instance into the future and leave a fresh clone
+        // behind for the next call (calling `poll_ready` and `call` on the same
+        // instance is required by the Service contract).
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+        Box::pin(async move {
+            // Acquire a permit before forwarding. Requests are queued (awaited),
+            // not rejected, under back-pressure. The permit is released when this
+            // future completes or is dropped. The semaphore is never closed, so
+            // `acquire_owned` cannot fail.
+            let _permit = sem
+                .acquire_owned()
+                .await
+                .expect("concurrency semaphore is never closed");
+            inner.call(req).await
+        })
     }
 }
 
@@ -245,10 +163,12 @@ pub fn router(state: AppState) -> Router {
 
     let api_and_mcp_resolved: Router<()> = api_and_mcp.with_state(state.clone());
 
-    // Apply auth first, then concurrency cap (so unauthenticated requests are
-    // rejected cheaply before consuming a concurrency permit).
+    // Layer order matters: in axum the LAST `.layer(...)` is the OUTERMOST and
+    // runs first. Apply the concurrency cap first (inner) and auth last (outer)
+    // so unauthenticated requests are rejected before consuming a concurrency
+    // permit; the cap then wraps only authenticated work.
     let authenticated = if let Some(layer) = auth_layer {
-        api_and_mcp_resolved.layer(layer).layer(concurrency_layer)
+        api_and_mcp_resolved.layer(concurrency_layer).layer(layer)
     } else {
         api_and_mcp_resolved.layer(concurrency_layer)
     };
