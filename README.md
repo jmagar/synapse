@@ -1,11 +1,37 @@
-# synapse2
+# synapse-rmcp
 
 Rust MCP and CLI server for local Synapse workflows — a full-parity port of
 [synapse-mcp](https://github.com/jmagar/synapse-mcp) implemented in Rust with
 the [rmcp](https://github.com/modelcontextprotocol/rust-sdk) framework.
 
-`synapse2` exposes two MCP tools (`flux` and `scout`) plus equivalent CLI
+The server exposes two MCP tools (`flux` and `scout`) plus equivalent CLI
 commands, covering all 59 production actions from the original TypeScript server.
+
+
+## npm / npx
+
+Run the stdio MCP server or CLI without a manual binary install:
+
+```bash
+npx -y synapse-rmcp --help
+```
+
+MCP clients can use the same launcher:
+
+```json
+{
+  "mcpServers": {
+    "synapse2": {
+      "command": "npx",
+      "args": ["-y", "synapse-rmcp"]
+    }
+  }
+}
+```
+
+The npm package downloads the `synapse` binary from GitHub Releases during `postinstall` and keeps the release tag aligned with `packages/synapse-rmcp/package.json`.
+
+Across the rmcp family, naming follows `repo=<service>-rmcp`, `npm=<service>-rmcp`, and `CLI=r<service>`. Synapse is the exception: the npm package is `synapse-rmcp`, but the installed CLI and binary alias remain `synapse`.
 
 ## Surfaces
 
