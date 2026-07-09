@@ -76,6 +76,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y nasm llvm clang lld
+          rustup target add x86_64-pc-windows-msvc
           cargo install cargo-xwin --locked
 
       - name: Build web assets
@@ -201,4 +202,13 @@ jobs:
           set -euo pipefail
           cache="$(mktemp -d)"
           trap 'rm -rf "$cache"' EXIT
+          for attempt in {1..12}; do
+            if npm view "synapse-rmcp@${{ steps.npm-version.outputs.version }}" version >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              npm view "synapse-rmcp@${{ steps.npm-version.outputs.version }}" version
+            fi
+            sleep 5
+          done
           npm_config_cache="$cache" npx -y "synapse-rmcp@${{ steps.npm-version.outputs.version }}" --version
