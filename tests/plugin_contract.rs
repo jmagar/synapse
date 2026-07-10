@@ -114,7 +114,7 @@ fn plugin_setup_delegates_to_binary_owned_hook_command() {
     );
     assert!(
         setup
-            .find("synapse_bin=\"$(ensure_synapse2_binary)\"")
+            .find("synapse_bin=\"$(synapse_binary)\"")
             .unwrap()
             < setup.find("export_if_set SYNAPSE_MCP_TOKEN").unwrap(),
         "plugin setup should verify the bundled binary before exporting secrets"
