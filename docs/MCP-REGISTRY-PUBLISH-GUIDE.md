@@ -26,7 +26,7 @@ using the `server.json` manifest at the repo root.
 | Field | Current value |
 |---|---|
 | `name` | `tv.tootie/synapse2` |
-| `repository.url` | `https://github.com/jmagar/synapse2` |
+| `repository.url` | `https://github.com/jmagar/synapse-rmcp` |
 | `packages[0].identifier` | `ghcr.io/jmagar/synapse2:<version>` |
 | Hosted remote | Not declared; add `remotes` only when a public hosted `/mcp` endpoint exists |
 

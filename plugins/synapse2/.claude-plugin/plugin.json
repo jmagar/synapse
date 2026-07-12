@@ -4,8 +4,8 @@
   "author": {
     "name": "jmagar"
   },
-  "repository": "https://github.com/jmagar/synapse2",
-  "homepage": "https://github.com/jmagar/synapse2",
+  "repository": "https://github.com/jmagar/synapse-rmcp",
+  "homepage": "https://github.com/jmagar/synapse-rmcp",
   "license": "MIT",
   "keywords": [
     "synapse2",

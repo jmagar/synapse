@@ -4,15 +4,15 @@
   "title": "Synapse2",
   "description": "Local Docker, Compose, host, SSH, log, ZFS, and file operations for MCP agents.",
   "repository": {
-    "url": "https://github.com/jmagar/synapse2",
+    "url": "https://github.com/jmagar/synapse-rmcp",
     "source": "github"
   },
-  "version": "0.5.2",
+  "version": "0.5.3",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/synapse2:0.5.2",
-      "version": "0.5.2",
+      "identifier": "ghcr.io/jmagar/synapse2:0.5.3",
+      "version": "0.5.3",
       "environmentVariables": [
         {
           "name": "SYNAPSE_MCP_TOKEN",
