@@ -43,7 +43,7 @@ RUN pnpm build
 #   docker inspect --format '{{index .RepoDigests 0}}' rust:1.96-slim-bookworm
 # Then replace the tag below with:
 #   FROM rust@sha256:<digest> AS builder  # rust:1.96-slim-bookworm
-FROM rust:1.96-slim-bookworm AS builder
+FROM rust:1.97-slim-bookworm AS builder
 
 WORKDIR /app
 
