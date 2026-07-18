@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
                Format: ## [X.Y.Z] — YYYY-MM-DD
                Use Added / Changed / Deprecated / Removed / Fixed / Security headers. -->
 
+## [0.6.1](https://github.com/jmagar/synapse-rmcp/compare/v0.6.0...v0.6.1) (2026-07-18)
+
+
+### Fixed
+
+* **test:** support rmcp 2.2 mcporter responses ([#70](https://github.com/jmagar/synapse-rmcp/issues/70)) ([792c13e](https://github.com/jmagar/synapse-rmcp/commit/792c13edf09b636031c243541251cbe82d5eef05))
+
 ## [0.6.0](https://github.com/jmagar/synapse-rmcp/compare/v0.5.4...v0.6.0) (2026-07-18)
 
 
