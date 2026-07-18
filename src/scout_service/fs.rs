@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 #[path = "fs_tests.rs"]
 mod tests;
 
-use crate::flux_service::host::{HostExec, LocalExec, RemoteExec, is_local_host};
+use crate::flux_service::host::{HostExec, RemoteExec, is_local_host};
 use crate::ssh::SshExecutor;
 use crate::synapse::{HostConfig, validate_scout_read_path};
 
@@ -31,6 +31,24 @@ pub const DELTA_MAX_CONTENT_BYTES: usize = 1024 * 1024; // 1 MB
 /// It leaves room below the global 40 KB MCP response safety net for JSON and
 /// markdown framing.
 pub const PEEK_MAX_CONTENT_BYTES: usize = 32 * 1024;
+
+/// Fixed remote walker. User values are separate argv entries and never become
+/// source code or shell text. The process exits as soon as `limit` is reached.
+const REMOTE_WALK_SCRIPT: &str = r#"import fnmatch, os, sys
+mode, root, pattern, max_depth, limit = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
+root_depth = root.rstrip(os.sep).count(os.sep)
+emitted = 0
+for current, dirs, files in os.walk(root, followlinks=False):
+    depth = current.rstrip(os.sep).count(os.sep) - root_depth
+    if depth >= max_depth:
+        dirs[:] = []
+    values = ([current] + [os.path.join(current, d) for d in dirs]) if mode == 'tree' else [os.path.join(current, f) for f in files if fnmatch.fnmatch(f, pattern)]
+    for value in values:
+        print(value)
+        emitted += 1
+        if emitted >= limit:
+            sys.exit(0)
+"#;
 
 // ─── peek ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +74,9 @@ pub async fn peek(
     }
 
     if is_local_host(host) {
-        peek_local(host, path)
+        let host = host.clone();
+        let path = path.to_owned();
+        tokio::task::spawn_blocking(move || peek_local(&host, &path)).await?
     } else {
         peek_remote(host, executor, path).await
     }
@@ -111,6 +131,8 @@ async fn peek_remote(host: &HostConfig, executor: &dyn SshExecutor, path: &str) 
     if kind == "symbolic link" {
         bail!("peek: path is a symbolic link, which is not permitted: {path}");
     }
+    let canonical = canonical_remote_read_path(host, executor, path).await?;
+    let path = canonical.as_str();
 
     if kind == "directory" {
         // List the directory with ls -1A.
@@ -178,15 +200,27 @@ async fn peek_tree(
 ) -> Result<Value> {
     let depth_str = depth.to_string();
     if is_local_host(host) {
-        let exec = LocalExec;
-        let out = exec
-            .run("find", &[path, "-maxdepth", &depth_str, "-print"])
-            .await?;
-        Ok(json!({ "host": host.name, "path": path, "depth": depth, "tree": out.stdout }))
+        let root = path.to_owned();
+        let tree = tokio::task::spawn_blocking(move || bounded_local_walk(&root, depth, 500))
+            .await??
+            .join("\n");
+        Ok(json!({ "host": host.name, "path": path, "depth": depth, "tree": tree }))
     } else {
+        let canonical = canonical_remote_read_path(host, executor, path).await?;
         let remote = RemoteExec { executor, host };
         let out = remote
-            .run("find", &[path, "-maxdepth", &depth_str, "-print"])
+            .run(
+                "python3",
+                &[
+                    "-c",
+                    REMOTE_WALK_SCRIPT,
+                    "tree",
+                    &canonical,
+                    "*",
+                    &depth_str,
+                    "500",
+                ],
+            )
             .await?;
         Ok(json!({ "host": host.name, "path": path, "depth": depth, "tree": out.stdout }))
     }
@@ -225,29 +259,33 @@ pub async fn find(
         .unwrap_or_else(|| "10".to_owned());
     let limit = limit.unwrap_or(500) as usize;
 
-    let args: Vec<&str> = vec![
-        path,
-        "-maxdepth",
-        &depth_str,
-        "-name",
-        pattern,
-        "-type",
-        "f",
-    ];
-
-    let out = if is_local_host(host) {
-        LocalExec.run("find", &args).await?
+    let files: Vec<String> = if is_local_host(host) {
+        let root = path.to_owned();
+        let pattern = pattern.to_owned();
+        tokio::task::spawn_blocking(move || bounded_local_find(&root, &pattern, depth_str, limit))
+            .await??
     } else {
-        RemoteExec { executor, host }.run("find", &args).await?
+        let canonical = canonical_remote_read_path(host, executor, path).await?;
+        let limit_arg = limit.to_string();
+        let remote_args = vec![
+            "-c",
+            REMOTE_WALK_SCRIPT,
+            "find",
+            canonical.as_str(),
+            pattern,
+            depth_str.as_str(),
+            limit_arg.as_str(),
+        ];
+        let out = RemoteExec { executor, host }
+            .run("python3", &remote_args)
+            .await?;
+        out.stdout
+            .lines()
+            .filter(|line| !line.is_empty())
+            .take(limit)
+            .map(ToOwned::to_owned)
+            .collect()
     };
-
-    let files: Vec<String> = out
-        .stdout
-        .lines()
-        .filter(|l| !l.is_empty())
-        .take(limit)
-        .map(|l| l.to_owned())
-        .collect();
 
     Ok(json!({
         "host": host.name,
@@ -291,12 +329,13 @@ pub async fn delta(
             let source_label = format!("{}:{}", source_host.name, source_path);
             let target_content = read_remote_file(th, executor, tp).await?;
             let target_label = format!("{}:{}", th.name, tp);
-            let diff = compute_diff(
-                &source_content,
-                &target_content,
-                &source_label,
-                &target_label,
-            );
+            let diff = bounded_diff(
+                source_content,
+                target_content,
+                source_label.clone(),
+                target_label.clone(),
+            )
+            .await?;
             Ok(json!({
                 "identical": diff.is_empty(),
                 "source": source_label,
@@ -307,7 +346,13 @@ pub async fn delta(
         (None, None, Some(inline)) => {
             let source_content = read_remote_file(source_host, executor, source_path).await?;
             let source_label = format!("{}:{}", source_host.name, source_path);
-            let diff = compute_diff(&source_content, inline, &source_label, "inline");
+            let diff = bounded_diff(
+                source_content,
+                inline.to_owned(),
+                source_label.clone(),
+                "inline".into(),
+            )
+            .await?;
             Ok(json!({
                 "identical": diff.is_empty(),
                 "source": source_label,
@@ -331,14 +376,16 @@ async fn read_remote_file(
 ) -> Result<String> {
     if is_local_host(host) {
         validate_scout_read_path(host, path)?;
-        Ok(std::fs::read_to_string(path)?)
+        let path = path.to_owned();
+        tokio::task::spawn_blocking(move || read_local_bounded(&path, DELTA_MAX_CONTENT_BYTES))
+            .await?
     } else {
         validate_scout_read_path(host, path)?;
         // Remote symlink guard (S-M1): stat the path via SSH before reading.
         // `env LC_ALL=C` keeps the "symbolic link" string locale-independent;
         // a failed stat must fail closed (not silently bypass the guard).
         let stat_out = executor
-            .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F", path])
+            .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F\t%s", path])
             .await?;
         if stat_out.exit_code != Some(0) {
             bail!(
@@ -347,15 +394,121 @@ async fn read_remote_file(
                 stat_out.stderr.trim()
             );
         }
-        let file_type = stat_out.stdout.trim();
+        let (file_type, size) = parse_stat_kind_size(stat_out.stdout.trim());
         if file_type == "symbolic link" {
             bail!("read_remote_file: path is a symbolic link, which is not permitted: {path}");
         }
-        let out = executor.exec(host, "cat", &[path]).await?;
+        let canonical = canonical_remote_read_path(host, executor, path).await?;
+        if size.is_some_and(|size| size > DELTA_MAX_CONTENT_BYTES as u64) {
+            bail!("delta file exceeds 1 MB limit: {path}");
+        }
+        let count = (DELTA_MAX_CONTENT_BYTES + 1).to_string();
+        let out = executor
+            .exec(host, "head", &["-c", &count, &canonical])
+            .await?;
         if out.exit_code != Some(0) && !out.stderr.is_empty() {
             bail!("read {path}: {}", out.stderr.trim());
         }
+        if out.stdout.len() > DELTA_MAX_CONTENT_BYTES {
+            bail!("delta file exceeds 1 MB limit: {path}");
+        }
         Ok(out.stdout)
+    }
+}
+
+async fn canonical_remote_read_path(
+    host: &HostConfig,
+    executor: &dyn SshExecutor,
+    path: &str,
+) -> Result<String> {
+    let output = executor.exec(host, "realpath", &["-e", "--", path]).await?;
+    if output.exit_code != Some(0) {
+        bail!(
+            "cannot canonicalize remote path {path}: {}",
+            output.stderr.trim()
+        );
+    }
+    let canonical = output.stdout.trim();
+    validate_scout_read_path(host, canonical)?;
+    Ok(canonical.to_owned())
+}
+
+fn read_local_bounded(path: &str, cap: usize) -> Result<String> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > cap as u64 {
+        bail!("delta file exceeds 1 MB limit: {path}");
+    }
+    let mut reader = File::open(path)?.take((cap + 1) as u64);
+    let mut content = String::new();
+    reader.read_to_string(&mut content)?;
+    if content.len() > cap {
+        bail!("delta file exceeds 1 MB limit: {path}");
+    }
+    Ok(content)
+}
+
+async fn bounded_diff(a: String, b: String, label_a: String, label_b: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || compute_diff(&a, &b, &label_a, &label_b))
+        .await
+        .map_err(Into::into)
+}
+
+fn bounded_local_walk(root: &str, max_depth: u8, limit: usize) -> Result<Vec<String>> {
+    let mut results = Vec::new();
+    let mut pending = vec![(std::path::PathBuf::from(root), 0_u8)];
+    while let Some((path, depth)) = pending.pop() {
+        results.push(path.to_string_lossy().into_owned());
+        if results.len() >= limit || depth >= max_depth {
+            continue;
+        }
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path)?.filter_map(Result::ok) {
+                pending.push((entry.path(), depth + 1));
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn bounded_local_find(
+    root: &str,
+    pattern: &str,
+    depth: String,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let max_depth = depth.parse::<u8>().unwrap_or(10);
+    let mut results = Vec::new();
+    let mut pending = vec![(std::path::PathBuf::from(root), 0_u8)];
+    while let Some((path, current_depth)) = pending.pop() {
+        if path.is_file()
+            && glob_matches(
+                pattern,
+                &path.file_name().unwrap_or_default().to_string_lossy(),
+            )
+        {
+            results.push(path.to_string_lossy().into_owned());
+            if results.len() >= limit {
+                break;
+            }
+        }
+        if path.is_dir() && current_depth < max_depth {
+            for entry in std::fs::read_dir(&path)?.filter_map(Result::ok) {
+                pending.push((entry.path(), current_depth + 1));
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    if pattern == "*" {
+        true
+    } else if let Some(suffix) = pattern.strip_prefix('*') {
+        name.ends_with(suffix)
+    } else if let Some(prefix) = pattern.strip_suffix('*') {
+        name.starts_with(prefix)
+    } else {
+        name == pattern
     }
 }
 
@@ -370,21 +523,35 @@ pub fn compute_diff(a: &str, b: &str, label_a: &str, label_b: &str) -> String {
     // Line-by-line diff (simple unified format without the patch header offsets).
     let a_lines: Vec<&str> = a.lines().collect();
     let b_lines: Vec<&str> = b.lines().collect();
+    let a_set: std::collections::HashSet<&str> = a_lines.iter().copied().collect();
+    let b_set: std::collections::HashSet<&str> = b_lines.iter().copied().collect();
 
     let mut result = format!("--- {label_a}\n+++ {label_b}\n");
+    let mut remaining =
+        crate::runtime_budget::SERVICE_TEXT_FIELD_BYTE_CAP.saturating_sub(result.len());
 
     // Naive diff: mark lines removed from a, added in b.
     // For parity we just produce a simple two-column representation.
     // A full Myers diff is out of scope; the format matches synapse-mcp's
     // "Files differ" indicator at the service layer.
     for line in &a_lines {
-        if !b_lines.contains(line) {
-            result.push_str(&format!("- {line}\n"));
+        if !b_set.contains(line) {
+            let line = format!("- {line}\n");
+            if line.len() > remaining {
+                break;
+            }
+            result.push_str(&line);
+            remaining -= line.len();
         }
     }
     for line in &b_lines {
-        if !a_lines.contains(line) {
-            result.push_str(&format!("+ {line}\n"));
+        if !a_set.contains(line) {
+            let line = format!("+ {line}\n");
+            if line.len() > remaining {
+                break;
+            }
+            result.push_str(&line);
+            remaining -= line.len();
         }
     }
 

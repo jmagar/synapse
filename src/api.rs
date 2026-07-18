@@ -12,6 +12,7 @@ use axum::{
 use lab_auth::AuthContext;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::time::Duration;
 
 use crate::actions::{SynapseAction, execute_service_action, required_scope_for_parsed_action};
 use crate::server::{AppState, AuthPolicy};
@@ -38,7 +39,7 @@ pub async fn api_dispatch(
     auth: Option<Extension<AuthContext>>,
     Json(body): Json<ActionRequest>,
 ) -> impl IntoResponse {
-    let result = match rest_action_from_request(&body.action, &body.params) {
+    let result = match crate::actions::rest::action_from_request(&body.action, &body.params) {
         Ok(action) => {
             if let Some(response) =
                 enforce_rest_scope(&state, auth.as_ref().map(|Extension(auth)| auth), &action)
@@ -110,75 +111,6 @@ pub async fn api_dispatch(
 /// gives `("flux", "docker.foo.bar")` which is then matched against the exact
 /// known second-segment set, and any non-matching value falls through to the
 /// catch-all error.
-fn rest_action_from_request(action: &str, params: &Value) -> Result<SynapseAction> {
-    match action {
-        "help" => Ok(SynapseAction::FluxHelp {
-            topic: None,
-            format: None,
-        }),
-        "scout.nodes" => Ok(SynapseAction::ScoutNodes),
-        other => {
-            // Split exactly once on '.' to get (domain, rest).
-            // A name with zero dots or three-or-more dots will either not match
-            // in the inner match below or fall through to UnknownAction.
-            let Some((domain, rest)) = other.split_once('.') else {
-                return Err(crate::actions::ValidationError::UnknownAction {
-                    action: other.to_owned(),
-                }
-                .into());
-            };
-
-            match (domain, rest) {
-                // Docker subactions over REST. Merge caller params (host,
-                // dangling_only, image, etc.) into the flux arg shape so REST
-                // honors the same options as MCP/CLI. Destructive subactions
-                // (build/rmi/prune) are reachable but hard-denied without the
-                // allow-destructive override (no elicitation channel over REST
-                // — see api_dispatch).
-                (
-                    "flux",
-                    sub @ ("docker.info" | "docker.df" | "docker.images" | "docker.networks"
-                    | "docker.volumes" | "docker.pull" | "docker.build" | "docker.rmi"
-                    | "docker.prune"),
-                ) => {
-                    // sub is "docker.<subaction>"; split once more to isolate
-                    // the subaction name without trimming a variable prefix.
-                    let subaction = sub.split_once('.').map(|(_, s)| s).unwrap_or(sub);
-                    let mut obj = params.as_object().cloned().unwrap_or_default();
-                    obj.insert("action".into(), json!("docker"));
-                    obj.insert("subaction".into(), json!(subaction));
-                    SynapseAction::from_flux_args(&Value::Object(obj))
-                }
-                ("flux", "container.list") => {
-                    // Merge caller params (may be null/absent) into the flux arg
-                    // shape so REST honors the same list filters as MCP/CLI.
-                    let mut obj = params.as_object().cloned().unwrap_or_default();
-                    obj.insert("action".into(), json!("container"));
-                    obj.insert("subaction".into(), json!("list"));
-                    SynapseAction::from_flux_args(&Value::Object(obj))
-                }
-                // Scout subactions: pass the raw params object through to
-                // from_scout_args so the parser owns defaults and required-field
-                // errors, matching the MCP path exactly.
-                ("scout", "peek") => {
-                    let mut obj = params.as_object().cloned().unwrap_or_default();
-                    obj.insert("action".into(), json!("peek"));
-                    SynapseAction::from_scout_args(&Value::Object(obj))
-                }
-                ("scout", "exec") => {
-                    let mut obj = params.as_object().cloned().unwrap_or_default();
-                    obj.insert("action".into(), json!("exec"));
-                    SynapseAction::from_scout_args(&Value::Object(obj))
-                }
-                _ => Err(crate::actions::ValidationError::UnknownAction {
-                    action: other.to_owned(),
-                }
-                .into()),
-            }
-        }
-    }
-}
-
 fn cap_rest_response(value: Value) -> Result<Value> {
     let serialized = serde_json::to_vec(&value)?;
     if serialized.len() <= MAX_RESPONSE_BYTES {
@@ -234,6 +166,27 @@ fn enforce_rest_scope(
 pub async fn health() -> impl IntoResponse {
     tracing::debug!("health probe");
     Json(json!({ "status": "ok" }))
+}
+
+/// `GET /ready` — bounded readiness probe.
+///
+/// Unlike liveness, readiness verifies that the configured host topology can
+/// be loaded. It deliberately does not dial every remote host: those checks
+/// would make readiness slow and flap on an unrelated fleet member.
+pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    match tokio::time::timeout(Duration::from_secs(2), state.service.scout().nodes()).await {
+        Ok(Ok(_)) => (StatusCode::OK, Json(json!({"status": "ready"}))).into_response(),
+        Ok(Err(error)) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"status": "not_ready", "error": error.to_string()})),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"status": "not_ready", "error": "topology check timed out"})),
+        )
+            .into_response(),
+    }
 }
 
 /// `GET /openapi.json` — generated OpenAPI schema for the REST surface.

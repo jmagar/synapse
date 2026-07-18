@@ -89,7 +89,12 @@ pub fn resolve_auth_policy_kind(config: &Config, trusted_gateway: bool) -> Resul
 
     if config.mcp.no_auth {
         if trusted_gateway {
-            return Ok(AuthPolicyKind::TrustedGatewayUnscoped);
+            anyhow::bail!(
+                "SYNAPSE_NOAUTH does not establish an enforceable authentication boundary. \
+                 Non-loopback trusted-gateway deployments must configure a local bearer token \
+                 or OAuth; the upstream gateway may still authenticate clients, but Synapse \
+                 independently authenticates the forwarded request."
+            );
         }
         anyhow::bail!(
             "Refusing to bind MCP server to {} with SYNAPSE_MCP_NO_AUTH=true.\n\
@@ -105,7 +110,10 @@ pub fn resolve_auth_policy_kind(config: &Config, trusted_gateway: bool) -> Resul
     } else if has_token {
         Ok(AuthPolicyKind::MountedBearer)
     } else if trusted_gateway {
-        Ok(AuthPolicyKind::TrustedGatewayUnscoped)
+        anyhow::bail!(
+            "SYNAPSE_NOAUTH does not establish enforceable authentication on a non-loopback \
+             bind; configure SYNAPSE_MCP_TOKEN or OAuth"
+        )
     } else {
         anyhow::bail!(
             "Refusing to bind MCP server to {} without authentication.\n\

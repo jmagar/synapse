@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **REST destructive-op denials return HTTP 403** (was 500) for both flux and scout actions when no elicitation channel is available.
 - **Stale SSH-forwarded Docker sockets evicted on transport death** across all docker/container read operations. Previously only some code paths triggered eviction.
+- **Scout CLI and execution contracts** now preserve argv, reject unknown or malformed options, and enforce requested command deadlines.
+- **Operator web authentication states** now attach tab-scoped bearer credentials, distinguish 401 from 403, and keep protected controls disabled without credentials.
+- **Cache and mutation error handling** now provides strict bounded LRU behavior and aborts log/recreate workflows on unexpected command failures.
 
 ### Changed
 

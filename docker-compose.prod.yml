@@ -31,7 +31,7 @@ x-common-service: &common-service
 services:
   synapse2:
     <<: *common-service
-    image: synapse2:${SYNAPSE2_VERSION:-latest}
+    image: ghcr.io/jmagar/synapse2:${SYNAPSE2_VERSION:-latest}
     container_name: synapse2
     env_file:
       - path: .env
@@ -44,6 +44,8 @@ services:
       SYNAPSE_MCP_HOST: 0.0.0.0
       SYNAPSE_MCP_PORT: "40080"
       SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:-}"
+      SYNAPSE_UID: "${PUID:-1000}"
+      SYNAPSE_GID: "${PGID:-1000}"
     ports:
       # Default: bind to loopback only — not exposed on all interfaces.
       # Production deployments should sit behind a reverse proxy (SWAG/nginx/Caddy)
@@ -71,7 +73,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    user: "1000:1000"
+    # The root entrypoint repairs bind-mount permissions, then drops to these
+    # IDs. Set PUID/PGID to the host operator when it is not 1000:1000.
     # The docker socket is owned by root:docker on the host. Add that group so the
     # UID-1000 service can reach the daemon. Set DOCKER_GID to your host's docker
     # group id:  getent group docker | cut -d: -f3

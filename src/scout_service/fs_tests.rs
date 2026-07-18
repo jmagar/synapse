@@ -82,6 +82,11 @@ async fn peek_remote_file_uses_bounded_head_read() {
                 args.iter().map(|arg| (*arg).to_owned()).collect(),
             ));
             match program {
+                "realpath" => Ok(CommandOutput {
+                    stdout: "/tmp/large.log\n".into(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                }),
                 // peek now runs `env LC_ALL=C stat ...` for the type/size probe.
                 "env" => Ok(CommandOutput {
                     stdout: format!("regular file\t{}", PEEK_MAX_CONTENT_BYTES + 500),
@@ -117,10 +122,11 @@ async fn peek_remote_file_uses_bounded_head_read() {
 
     let calls = exec.calls.lock().unwrap();
     assert_eq!(calls[0].0, "env");
-    assert_eq!(calls[1].0, "head");
-    assert_eq!(calls[1].1[0], "-c");
-    assert_eq!(calls[1].1[1], (PEEK_MAX_CONTENT_BYTES + 1).to_string());
-    assert_eq!(calls[1].1[2], "/tmp/large.txt");
+    assert_eq!(calls[1].0, "realpath");
+    assert_eq!(calls[2].0, "head");
+    assert_eq!(calls[2].1[0], "-c");
+    assert_eq!(calls[2].1[1], (PEEK_MAX_CONTENT_BYTES + 1).to_string());
+    assert_eq!(calls[2].1[2], "/tmp/large.log");
     assert!(
         calls.iter().all(|(program, _)| program != "cat"),
         "peek must not use unbounded cat"
@@ -250,6 +256,58 @@ fn find_rejects_over_length_pattern() {
         msg.contains("too long") || msg.contains("256"),
         "error must mention length: {msg}"
     );
+}
+
+#[tokio::test]
+async fn remote_find_uses_fixed_bounded_walker_and_argv_limit() {
+    #[derive(Default)]
+    struct RecordingExec {
+        calls: RecordedSshCalls,
+    }
+    #[async_trait]
+    impl SshExecutor for RecordingExec {
+        async fn exec(
+            &self,
+            _: &HostConfig,
+            program: &str,
+            args: &[&str],
+        ) -> anyhow::Result<CommandOutput> {
+            self.calls.lock().unwrap().push((
+                program.to_owned(),
+                args.iter().map(|arg| (*arg).to_owned()).collect(),
+            ));
+            match program {
+                "realpath" => Ok(CommandOutput {
+                    stdout: "/tmp/root\n".into(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                }),
+                "python3" => Ok(CommandOutput {
+                    stdout: "/tmp/root/a.log\n/tmp/root/b.log\n".into(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                }),
+                other => anyhow::bail!("unexpected program: {other}"),
+            }
+        }
+    }
+
+    let exec = RecordingExec::default();
+    let mut host = HostConfig::local();
+    host.name = "remote".into();
+    host.host = "remote.example".into();
+    host.protocol = crate::synapse::HostProtocol::Ssh;
+    host.scout_read_roots = vec!["/tmp".into()];
+    let result = find(&host, &exec, "/tmp/root", "*.log", Some(4), Some(2))
+        .await
+        .unwrap();
+    assert_eq!(result["count"], 2);
+    let calls = exec.calls.lock().unwrap();
+    let walker = calls.iter().find(|call| call.0 == "python3").unwrap();
+    assert_eq!(walker.1[0], "-c");
+    assert_eq!(walker.1[2], "find");
+    assert_eq!(walker.1.last().unwrap(), "2");
+    assert!(walker.1[1].contains("sys.exit(0)"));
 }
 
 // ─── remote symlink guard (S-M1) ─────────────────────────────────────────────

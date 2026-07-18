@@ -23,21 +23,31 @@ export default function DashboardPage() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const nextIdRef = useRef(1);
 
-  const checkHealth = useCallback(async () => {
-    const res = await getHealth();
+  const checkHealth = useCallback(async (signal?: AbortSignal) => {
+    const res = await getHealth(signal);
+    if (signal?.aborted) return;
     setHealth(res.data?.status === "ok" ? "ok" : "error");
   }, []);
 
-  const checkStatus = useCallback(async () => {
-    const res = await getStatus();
+  const checkStatus = useCallback(async (signal?: AbortSignal) => {
+    const res = await getStatus(signal);
+    if (signal?.aborted) return;
     if (res.data) setServerStatus(res.data);
   }, []);
 
   useEffect(() => {
-    checkHealth();
-    checkStatus();
-    const interval = setInterval(checkHealth, 10_000);
-    return () => clearInterval(interval);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await checkHealth(controller.signal);
+      if (!controller.signal.aborted) timer = setTimeout(poll, 10_000);
+    };
+    void poll();
+    void checkStatus(controller.signal);
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [checkHealth, checkStatus]);
 
   const addActivity = useCallback((action: string, result: string, ok: boolean) => {

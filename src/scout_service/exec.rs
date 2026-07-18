@@ -44,10 +44,13 @@ use crate::elicitation_gate::Confirmer;
 use crate::fanout::{FanoutOutcome, fanout};
 use crate::flux_service::host::is_local_host;
 use crate::ssh::SshExecutor;
-use crate::synapse::{HostConfig, validate_command, validate_safe_path};
+use crate::synapse::{HostConfig, validate_command, validate_command_args, validate_safe_path};
+use crate::synapse::{command_filesystem_operand_indices, validate_scout_read_path};
 
-/// Default timeout for `emit` per-host execution.
-const EMIT_DEFAULT_TIMEOUT_SECS: u64 = 30;
+/// Default timeout for Scout command execution.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+/// Upper bound for caller-controlled command timeouts.
+pub const MAX_TIMEOUT_SECS: u64 = 300;
 
 // ─── exec ────────────────────────────────────────────────────────────────────
 
@@ -66,13 +69,27 @@ pub async fn exec(
     args: &[String],
     path: Option<&str>,
 ) -> Result<Value> {
+    exec_with_timeout(host, executor, confirmer, command, args, path, None).await
+}
+
+/// Run a single-host command with the caller-requested bounded deadline.
+pub async fn exec_with_timeout(
+    host: &HostConfig,
+    executor: &dyn SshExecutor,
+    confirmer: &dyn Confirmer,
+    command: &str,
+    args: &[String],
+    path: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> Result<Value> {
     // Syntactic + symlink guard for path (optional).
     if let Some(p) = path {
-        validate_safe_path(p)?;
+        validate_scout_read_path(host, p)?;
     }
 
     // Command allowlist check (hard error before any IO).
-    validate_command(command, &host.exec_allowlist)?;
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    validate_command_args(host, command, &arg_refs)?;
 
     // Destructive gate (B5). Caller supplies confirmer; we just call .require().
     let details = format!(
@@ -82,13 +99,61 @@ pub async fn exec(
     );
     confirmer.require("scout:exec", &details).await?;
 
-    let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let arg_strs = arg_refs;
 
-    if is_local_host(host) {
-        exec_local(host, command, &arg_strs, path).await
-    } else {
-        exec_remote(host, executor, command, &arg_strs).await
+    let timeout_secs = timeout_secs
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .clamp(1, MAX_TIMEOUT_SECS);
+    let operation = async {
+        if is_local_host(host) {
+            let canonical = canonical_command_args(host, command, &arg_strs, None).await?;
+            let refs = canonical.iter().map(String::as_str).collect::<Vec<_>>();
+            exec_local(host, command, &refs, path).await
+        } else {
+            if path.is_some() {
+                bail!("path is only supported for local scout exec targets");
+            }
+            let canonical =
+                canonical_command_args(host, command, &arg_strs, Some(executor)).await?;
+            let refs = canonical.iter().map(String::as_str).collect::<Vec<_>>();
+            exec_remote(host, executor, command, &refs).await
+        }
+    };
+    crate::runtime_budget::with_deadline(
+        &format!("scout exec `{command}` on {}", host.name),
+        Duration::from_secs(timeout_secs),
+        operation,
+    )
+    .await
+}
+
+async fn canonical_command_args(
+    host: &HostConfig,
+    command: &str,
+    args: &[&str],
+    remote: Option<&dyn SshExecutor>,
+) -> Result<Vec<String>> {
+    let mut canonical = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+    for index in command_filesystem_operand_indices(command, args) {
+        let resolved = if let Some(executor) = remote {
+            let output = executor
+                .exec(host, "realpath", &["-e", "--", args[index]])
+                .await?;
+            if output.exit_code != Some(0) {
+                bail!("cannot canonicalize remote operand {}", args[index]);
+            }
+            output.stdout.trim().to_owned()
+        } else {
+            let path = args[index].to_owned();
+            tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
+                .await??
+                .to_string_lossy()
+                .into_owned()
+        };
+        validate_scout_read_path(host, &resolved)?;
+        canonical[index] = resolved;
     }
+    Ok(canonical)
 }
 
 async fn exec_local(
@@ -172,7 +237,11 @@ pub async fn emit(
     let details = format!("command={command} targets={}", target_labels.join(", "));
     confirmer.require("scout:emit", &details).await?;
 
-    let timeout = Duration::from_secs(timeout_secs.unwrap_or(EMIT_DEFAULT_TIMEOUT_SECS));
+    let timeout = Duration::from_secs(
+        timeout_secs
+            .unwrap_or(DEFAULT_TIMEOUT_SECS)
+            .clamp(1, MAX_TIMEOUT_SECS),
+    );
 
     // Build the host list from targets (fanout works over HostConfig slices).
     let host_configs: Vec<HostConfig> = targets.iter().map(|t| t.host.clone()).collect();
@@ -187,9 +256,8 @@ pub async fn emit(
         let target_paths = Arc::clone(&target_paths);
         async move {
             // Per-host command validation (host-specific allowlist may differ).
-            validate_command(&cmd, &host.exec_allowlist).map_err(|e| e.to_string())?;
-
             let arg_refs: Vec<&str> = arg_strs.iter().map(|s| s.as_str()).collect();
+            validate_command_args(&host, &cmd, &arg_refs).map_err(|e| e.to_string())?;
             let path = target_paths
                 .get(&host.name)
                 .and_then(|path| path.as_deref());

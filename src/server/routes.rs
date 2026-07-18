@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     http::{HeaderValue, Method, StatusCode},
-    response::Json,
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
 };
 use serde_json::json;
@@ -86,7 +86,7 @@ struct ConcurrencyLimitService<S> {
 
 impl<S, ReqBody> Service<axum::http::Request<ReqBody>> for ConcurrencyLimitService<S>
 where
-    S: Service<axum::http::Request<ReqBody>, Error = std::convert::Infallible>
+    S: Service<axum::http::Request<ReqBody>, Response = Response, Error = std::convert::Infallible>
         + Clone
         + Send
         + 'static,
@@ -94,7 +94,7 @@ where
     S::Response: Send + 'static,
     ReqBody: Send + 'static,
 {
-    type Response = S::Response;
+    type Response = Response;
     type Error = S::Error;
     type Future = BoxedServiceFuture<S::Response, S::Error>;
 
@@ -111,20 +111,24 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
         Box::pin(async move {
-            // Acquire a permit before forwarding. Requests are queued (awaited),
-            // not rejected, under back-pressure. The permit is released when this
-            // future completes or is dropped. The semaphore is never closed, so
-            // `acquire_owned` cannot fail.
-            let _permit = sem
-                .acquire_owned()
-                .await
-                .expect("concurrency semaphore is never closed");
+            // Admission is intentionally non-waiting. A semaphore wait list is
+            // itself an unbounded queue and lets a request storm consume memory.
+            let Ok(_permit) = sem.try_acquire_owned() else {
+                return Ok((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(json!({
+                        "error": "server overloaded",
+                        "retryable": true,
+                    })),
+                )
+                    .into_response());
+            };
             inner.call(req).await
         })
     }
 }
 
-use crate::api::{api_dispatch, health, openapi_json, status};
+use crate::api::{api_dispatch, health, openapi_json, ready, status};
 use crate::mcp::{allowed_origins, streamable_http_config, streamable_http_service};
 use crate::server::{AppState, AuthPolicy, build_auth_layer};
 
@@ -197,13 +201,14 @@ pub fn router(state: AppState) -> Router {
         None
     };
 
-    // /health and /status are always public (monitoring probes).
+    // /health, /ready and /status are always public (monitoring probes).
     // /openapi.json exposes the full action schema and is gated behind auth on
     // non-loopback/Mounted policies to prevent unauthenticated schema enumeration
     // (S-M7 / CWE-200). On LoopbackDev and TrustedGatewayUnscoped it remains
     // open — auth is enforced at the transport/gateway layer in those modes.
     let always_public: Router<()> = Router::new()
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/status", get(status))
         .with_state(state.clone());
 

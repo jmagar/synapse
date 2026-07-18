@@ -26,6 +26,7 @@ export type ActionSpec = {
   label: string;
   description: string;
   scope: ActionScope;
+  destructive?: boolean;
   transport: "rest" | "mcp-only";
   params: readonly ActionParam[];
   example: {
@@ -156,6 +157,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   },
   {
     id: "flux.docker.build",
+    destructive: true,
     label: "flux.docker.build",
     description: "Build a Docker image from a context on a target host.",
     scope: "synapse:write",
@@ -202,6 +204,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   },
   {
     id: "flux.docker.rmi",
+    destructive: true,
     label: "flux.docker.rmi",
     description: "Remove a Docker image from a target host.",
     scope: "synapse:write",
@@ -220,15 +223,19 @@ export const ACTIONS: readonly ActionSpec[] = [
         name: "force",
         label: "Force",
         type: "checkbox",
-        required: false,
-        description: "Force image removal.",
+        required: true,
+        description: "Required safety acknowledgement for image removal.",
       },
     ],
-    example: { action: "flux.docker.rmi", params: { host: "myhost", image: "nginx:latest" } },
+    example: {
+      action: "flux.docker.rmi",
+      params: { host: "myhost", image: "nginx:latest", force: true },
+    },
     response: { host: "myhost", image: "nginx:latest", removed: true },
   },
   {
     id: "flux.docker.prune",
+    destructive: true,
     label: "flux.docker.prune",
     description: "Prune unused Docker resources on a target host.",
     scope: "synapse:write",
@@ -240,11 +247,21 @@ export const ACTIONS: readonly ActionSpec[] = [
         label: "Target",
         type: "text",
         placeholder: "system",
-        required: false,
+        required: true,
         description: "Resource class to prune, such as system, images, containers, or volumes.",
       },
+      {
+        name: "force",
+        label: "Force",
+        type: "checkbox",
+        required: true,
+        description: "Required safety acknowledgement for pruning Docker resources.",
+      },
     ],
-    example: { action: "flux.docker.prune", params: { host: "myhost" } },
+    example: {
+      action: "flux.docker.prune",
+      params: { host: "myhost", prune_target: "system", force: true },
+    },
     response: { host: "myhost", reclaimed_bytes: 123456789 },
   },
   {
@@ -335,6 +352,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   },
   {
     id: "scout.exec",
+    destructive: true,
     label: "scout.exec",
     description: "Run an allowlisted command on a target host.",
     scope: "synapse:write",

@@ -201,7 +201,8 @@ pub fn check_auth_config(config: &Config) -> DoctorCheck {
                  1. Bind to loopback:    SYNAPSE_MCP_HOST=127.0.0.1\n    \
                  2. Set a bearer token:  SYNAPSE_MCP_TOKEN=$(openssl rand -hex 32)\n    \
                  3. Enable OAuth:        SYNAPSE_MCP_AUTH_MODE=oauth\n    \
-                 4. Upstream gateway:    SYNAPSE_NOAUTH=true\n    \
+                 An upstream gateway may authenticate clients, but Synapse still requires \
+                 a bearer token or OAuth on non-loopback binds.\n    \
                  TEMPLATE: Replace SYNAPSE_ prefix with your service prefix."
             ),
         ),

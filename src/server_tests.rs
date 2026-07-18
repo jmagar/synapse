@@ -28,21 +28,27 @@ fn non_loopback_no_auth_without_gateway_is_rejected() {
 }
 
 #[test]
-fn non_loopback_no_auth_with_gateway_is_trusted_gateway_unscoped() {
+fn non_loopback_no_auth_with_gateway_is_rejected_without_local_auth() {
     let mut config = config("0.0.0.0");
     config.mcp.no_auth = true;
-    assert_eq!(
-        resolve_auth_policy_kind(&config, true).unwrap(),
-        AuthPolicyKind::TrustedGatewayUnscoped
-    );
+    let error = resolve_auth_policy_kind(&config, true).unwrap_err();
+    assert!(error.to_string().contains("enforceable authentication"));
 }
 
 #[test]
-fn non_loopback_gateway_without_credentials_is_trusted_gateway_unscoped() {
+fn non_loopback_gateway_without_credentials_is_rejected() {
     let config = config("0.0.0.0");
+    let error = resolve_auth_policy_kind(&config, true).unwrap_err();
+    assert!(error.to_string().contains("enforceable authentication"));
+}
+
+#[test]
+fn trusted_gateway_with_bearer_still_mounts_auth() {
+    let mut config = config("0.0.0.0");
+    config.mcp.api_token = Some("secret".into());
     assert_eq!(
         resolve_auth_policy_kind(&config, true).unwrap(),
-        AuthPolicyKind::TrustedGatewayUnscoped
+        AuthPolicyKind::MountedBearer
     );
 }
 

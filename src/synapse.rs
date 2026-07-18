@@ -63,6 +63,23 @@ impl HostConfig {
             exec_allowlist: Vec::new(),
         }
     }
+
+    /// Complete identity for every transport-affecting topology field.
+    /// Caches must never key only by alias: aliases can be retargeted at runtime.
+    pub fn connection_key(&self) -> String {
+        format!(
+            "{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
+            self.name,
+            self.protocol,
+            self.host,
+            self.port.map(|v| v.to_string()).unwrap_or_default(),
+            self.ssh_user.as_deref().unwrap_or_default(),
+            self.ssh_port.map(|v| v.to_string()).unwrap_or_default(),
+            self.ssh_key_path.as_deref().unwrap_or_default(),
+            self.ssh_config_path.as_deref().unwrap_or_default(),
+            self.docker_socket_path.as_deref().unwrap_or_default(),
+        )
+    }
 }
 
 fn default_protocol() -> HostProtocol {
@@ -235,6 +252,62 @@ pub fn validate_command(command: &str, host_allowlist: &[String]) -> Result<()> 
         return Ok(());
     }
     bail!("command is not allowlisted");
+}
+
+/// Validate the typed argv policy for a read-only Scout command.
+///
+/// The executable allowlist is only the first boundary. Options that execute a
+/// helper or load arbitrary configuration are denied, and every filesystem
+/// operand is checked against the host's read roots.
+pub fn validate_command_args(host: &HostConfig, command: &str, args: &[&str]) -> Result<()> {
+    validate_command(command, &host.exec_allowlist)?;
+    if args.iter().any(|arg| arg.contains('\0')) {
+        bail!("command arguments must not contain NUL bytes");
+    }
+
+    if command == "rg" {
+        const DENIED: &[&str] = &["--pre", "--config"];
+        for arg in args {
+            if DENIED
+                .iter()
+                .any(|flag| *arg == *flag || arg.starts_with(&format!("{flag}=")))
+            {
+                bail!("rg option {arg} is not permitted");
+            }
+        }
+    }
+
+    for index in command_filesystem_operand_indices(command, args) {
+        validate_scout_read_path(host, args[index])?;
+    }
+    Ok(())
+}
+
+pub(crate) fn command_filesystem_operand_indices(command: &str, args: &[&str]) -> Vec<usize> {
+    let path_commands = ["cat", "ls", "tree", "stat", "file", "du", "diff"];
+    if path_commands.contains(&command) {
+        return args
+            .iter()
+            .enumerate()
+            .filter_map(|(index, arg)| (!arg.starts_with('-')).then_some(index))
+            .collect();
+    }
+    if matches!(command, "grep" | "rg") {
+        let mut positional = args
+            .iter()
+            .enumerate()
+            .filter_map(|(index, arg)| (!arg.starts_with('-')).then_some(index));
+        let _pattern = positional.next();
+        return positional.collect();
+    }
+    if matches!(command, "head" | "tail") {
+        return args
+            .iter()
+            .enumerate()
+            .filter_map(|(index, arg)| arg.starts_with('/').then_some(index))
+            .collect();
+    }
+    Vec::new()
 }
 
 // load_hosts() and host_config_paths() have been moved to src/host_config.rs

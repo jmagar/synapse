@@ -15,6 +15,7 @@ Maintenance and automation scripts for the template. Shell scripts are written f
 | `check-dependency-updates.sh` | Report lockfile-compatible and latest dependency updates. |
 | `check-file-size.sh` | Pre-commit source file size budget. |
 | `check-runtime-current.sh` | Detect stale Docker/systemd runtimes. |
+| `check-yanked-exceptions.py` | Fail on unapproved or expired yanked dependency exceptions. |
 | `check-openapi.py` | Generate/check `docs/generated/openapi.json` for the REST API surface. |
 | `check-schema-docs.py` | Generate/check `docs/MCP_SCHEMA.md` and action docs. |
 | `check-scaffold-intent-contract.py` | Validate scaffold intent schema and examples without third-party dependencies. |
@@ -26,6 +27,7 @@ Maintenance and automation scripts for the template. Shell scripts are written f
 | `run-ascii-check.sh` | Collect tracked files and run `asciicheck.py`; pass `--fix` to rewrite in place. |
 | `sync-cargo.sh` | Sync `Cargo.lock` into plugin data directories. |
 | `test-mcp-auth.sh` | Smoke-test HTTP MCP bearer auth. |
+| `test-live-jsonrpc.sh` | Smoke-test a live MCP server and disposable SSH fixture. |
 | `test-template-features.sh` | Fast template invariant smoke tests. |
 | `validate-plugin-layout.sh` | Validate Claude/Codex/Gemini plugin package layout. |
 | `web-watch.sh` | Watch `apps/web` for changes and rebuild on save (requires watchexec). |
@@ -136,6 +138,17 @@ just runtime-current
 ```
 
 Systemd mode compares the running process hash to the unit `ExecStart` binary and optional expected binary. Docker mode compares the running container image ID with the local Compose image ID.
+
+### `check-yanked-exceptions.py`
+
+```bash
+python3 scripts/check-yanked-exceptions.py
+```
+
+Runs the Cargo Deny advisories check and rejects every yanked dependency except
+the exact, documented, time-bounded exception in the script. It also fails once
+an exception reaches its expiry date, ensuring the waiver cannot become
+permanent by accident.
 
 ### `check-schema-docs.py`
 

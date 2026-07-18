@@ -134,6 +134,19 @@ The UI calls:
 - `/v1/synapse2`
 - `/mcp` for MCP clients rather than browser UI calls
 
+## Browser authentication
+
+The tool runner accepts a bearer credential and stores it in `sessionStorage`,
+so it is cleared with the browser tab and is never embedded in the static
+export. Same-origin OAuth cookies/redirect endpoints remain server-managed;
+the fetch client sends same-origin credentials. The UI distinguishes missing or
+invalid credentials (HTTP 401) from valid credentials lacking scope (HTTP 403)
+and disables protected controls until a browser credential is present.
+
+Static bearer credentials are read-only. Browser write actions require an
+OAuth access token with `synapse:write` or authorization performed by the
+trusted gateway. Never place a bearer token in `NEXT_PUBLIC_*` variables.
+
 ## Aurora design system
 
 The web UI uses the Aurora design system — shadcn-compatible components for operator-grade AI products.

@@ -162,16 +162,18 @@ impl ScoutService {
         path: Option<&str>,
         command: &str,
         args: &[String],
+        timeout_secs: Option<u64>,
         confirmer: &dyn Confirmer,
     ) -> Result<Value> {
         let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
-        exec::exec(
+        exec::exec_with_timeout(
             &host,
             self.ssh_pool.as_ref(),
             confirmer,
             command,
             args,
             path,
+            timeout_secs,
         )
         .await
     }

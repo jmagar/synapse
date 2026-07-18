@@ -93,6 +93,11 @@ pub(super) fn file_sizes(reporter: &mut PatternReporter) -> Result<()> {
 
     for line in output.lines().filter(|line| !line.trim().is_empty()) {
         let path = Path::new(line);
+        // `git ls-files` includes paths deleted in the worktree until they are
+        // staged. Review/repair workflows must evaluate the actual checkout.
+        if !path.exists() {
+            continue;
+        }
         if is_test_file(path) {
             continue;
         }

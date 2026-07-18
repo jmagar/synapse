@@ -130,14 +130,14 @@ fn auth_config_passes_loopback_no_auth() {
 }
 
 #[test]
-fn auth_config_passes_typed_trusted_gateway() {
+fn auth_config_rejects_unenforced_typed_trusted_gateway() {
     let mut config = auth_config("0.0.0.0");
     config.mcp.trusted_gateway = true;
 
     let check = check_auth_config(&config);
 
-    assert!(check.ok);
-    assert!(check.value.unwrap().contains("trusted gateway"));
+    assert!(!check.ok);
+    assert!(check.hint.unwrap().contains("enforceable authentication"));
 }
 
 #[test]

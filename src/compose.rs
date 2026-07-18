@@ -45,6 +45,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use futures::StreamExt;
 use serde::Serialize;
 
 use crate::cache::{Cache, MemoryCache};
@@ -248,6 +249,7 @@ pub struct ComposeDiscovery {
     ssh: Arc<dyn SshExecutor>,
     /// Per-host cache of the merged project list, keyed by host name.
     cache: MemoryCache<String, Vec<ComposeProject>>,
+    in_flight: dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl ComposeDiscovery {
@@ -257,6 +259,7 @@ impl ComposeDiscovery {
         Self {
             ssh,
             cache: MemoryCache::with_ttl(DEFAULT_CACHE_TTL),
+            in_flight: dashmap::DashMap::new(),
         }
     }
 
@@ -266,6 +269,7 @@ impl ComposeDiscovery {
         Self {
             ssh,
             cache: MemoryCache::with_ttl(ttl),
+            in_flight: dashmap::DashMap::new(),
         }
     }
 
@@ -275,6 +279,15 @@ impl ComposeDiscovery {
     /// Validation requirement: `flux compose list` returns projects from both
     /// the filesystem scan and active `docker compose ls`.
     pub async fn list(&self, host: &HostConfig) -> Result<Vec<ComposeProject>> {
+        if let Some(cached) = self.cache.get(&host.name) {
+            return Ok(cached);
+        }
+        let lock = self
+            .in_flight
+            .entry(host.name.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let _guard = lock.lock().await;
         if let Some(cached) = self.cache.get(&host.name) {
             return Ok(cached);
         }
@@ -328,25 +341,32 @@ impl ComposeDiscovery {
 
         let files = self.find_compose_files(host, &search_paths).await?;
 
-        let mut projects = Vec::with_capacity(files.len());
-        for file in files {
-            // Resolve the explicit `name:` field; fall back to directory name.
-            let name = match self.read_compose_name(host, &file).await {
-                Some(name) => name,
-                None => project_name_from_path(&file),
-            };
-            if name.is_empty() {
-                continue;
-            }
-            projects.push(ComposeProject {
-                name,
-                config_files: vec![file],
-                status: String::new(),
-                service_count: 0,
-                discovered_from: DiscoveredFrom::Scan,
-            });
-        }
-        Ok(projects)
+        let projects = futures::stream::iter(files.into_iter().enumerate())
+            .map(|(index, file)| async move {
+                let name = self
+                    .read_compose_name(host, &file)
+                    .await
+                    .unwrap_or_else(|| project_name_from_path(&file));
+                (!name.is_empty()).then(|| {
+                    (
+                        index,
+                        ComposeProject {
+                            name,
+                            config_files: vec![file],
+                            status: String::new(),
+                            service_count: 0,
+                            discovered_from: DiscoveredFrom::Scan,
+                        },
+                    )
+                })
+            })
+            .buffer_unordered(8)
+            .filter_map(|project| async move { project })
+            .collect::<Vec<_>>()
+            .await;
+        let mut projects = projects;
+        projects.sort_unstable_by_key(|(index, _)| *index);
+        Ok(projects.into_iter().map(|(_, project)| project).collect())
     }
 
     /// Build and run the `find` command, returning compose file paths.

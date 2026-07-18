@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synapse2 REST API",
-    "version": "0.5.3",
+    "version": "0.5.4",
     "description": "Generated OpenAPI schema for Synapse2's REST surface. Auth modes: loopback/trusted-gateway deployments may have no local auth; mounted bearer mode uses SYNAPSE_MCP_TOKEN; OAuth mode uses bearer JWTs. REST actions require their action-specific scopes when auth is mounted."
   },
   "servers": [
@@ -456,7 +456,7 @@
   },
   "x-template": {
     "source": "scripts/check-openapi.py",
-    "action_metadata": "src/actions.rs",
+    "action_metadata": "src/actions/rest.rs",
     "rest_actions": [
       "help",
       "flux.docker.info",
@@ -472,6 +472,127 @@
       "scout.nodes",
       "scout.peek",
       "scout.exec"
+    ],
+    "rest_operations": [
+      {
+        "name": "help",
+        "scope": "public",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.info",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.df",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.images",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.networks",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.volumes",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "flux.docker.pull",
+        "scope": "synapse:write",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": [
+          "host",
+          "image"
+        ]
+      },
+      {
+        "name": "flux.docker.build",
+        "scope": "synapse:write",
+        "transport": "Any",
+        "destructive": true,
+        "required_params": [
+          "host",
+          "context",
+          "tag"
+        ]
+      },
+      {
+        "name": "flux.docker.rmi",
+        "scope": "synapse:write",
+        "transport": "Any",
+        "destructive": true,
+        "required_params": [
+          "host",
+          "image",
+          "force"
+        ]
+      },
+      {
+        "name": "flux.docker.prune",
+        "scope": "synapse:write",
+        "transport": "Any",
+        "destructive": true,
+        "required_params": [
+          "host",
+          "prune_target",
+          "force"
+        ]
+      },
+      {
+        "name": "flux.container.list",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "scout.nodes",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": []
+      },
+      {
+        "name": "scout.peek",
+        "scope": "synapse:read",
+        "transport": "Any",
+        "destructive": false,
+        "required_params": [
+          "host",
+          "path"
+        ]
+      },
+      {
+        "name": "scout.exec",
+        "scope": "synapse:write",
+        "transport": "Any",
+        "destructive": true,
+        "required_params": [
+          "host",
+          "command"
+        ]
+      }
     ],
     "mcp_actions": [
       "help",

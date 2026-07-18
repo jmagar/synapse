@@ -40,9 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install Rust (stable with rustfmt)
+      - name: Install Rust 1.90 with rustfmt
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: 1.90.0
           components: rustfmt
 
       - name: cargo fmt --check
@@ -56,9 +57,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install Rust (stable with clippy)
+      - name: Install Rust 1.90 with clippy
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: 1.90.0
           components: clippy
 
       # Cache Cargo registry and build artifacts between runs.
@@ -84,8 +86,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install Rust (stable)
+      - name: Install Rust 1.90
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.90.0
 
       # TEMPLATE: Change cache key prefix from "rmcp-template" to your repo name.
       - name: Cache Cargo
@@ -103,6 +107,85 @@ jobs:
 
       - name: cargo nextest run --profile ci
         run: cargo nextest run --profile ci
+
+  coverage:
+    name: Coverage (65% lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust 1.90
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.90.0
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@95cc2373c3f00275e315c306e56fef1c7a8854c0 # cargo-llvm-cov
+
+      - name: Enforce line coverage floor
+        run: cargo llvm-cov --locked --workspace --all-features --fail-under-lines 65
+
+  live-integration:
+    name: Live JSON-RPC + SSH
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust 1.90
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.90.0
+
+      - name: Configure disposable localhost SSH fixture
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          sudo ssh-keygen -A
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/id_ed25519"
+          cp "$RUNNER_TEMP/id_ed25519.pub" "$RUNNER_TEMP/authorized_keys"
+          chmod 600 "$RUNNER_TEMP/id_ed25519" "$RUNNER_TEMP/authorized_keys"
+          cat >"$RUNNER_TEMP/sshd_config" <<EOF
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          AuthorizedKeysFile $RUNNER_TEMP/authorized_keys
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          StrictModes no
+          UsePAM no
+          AllowUsers $USER
+          EOF
+          sudo mkdir -p /run/sshd
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/sshd.log"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keyscan -p 2222 127.0.0.1 >>"$HOME/.ssh/known_hosts" 2>/dev/null
+          printf '%s\n' 'synapse-live-ssh-ok' >/tmp/synapse-ci-fixture
+
+      - name: Exercise SSH pool against the fixture
+        env:
+          SYNAPSE_TEST_SSH_REQUIRED: "1"
+          SYNAPSE_TEST_SSH_HOST: 127.0.0.1
+          SYNAPSE_TEST_SSH_PORT: "2222"
+          SYNAPSE_TEST_SSH_USER: runner
+          SYNAPSE_TEST_SSH_KEY: ${{ runner.temp }}/id_ed25519
+        run: cargo test --locked --test ssh_pool
+
+      - name: Exercise live MCP JSON-RPC through SSH
+        shell: bash
+        env:
+          SYNAPSE_MCP_NO_AUTH: "true"
+          SYNAPSE_HOSTS_CONFIG: >-
+            [{"name":"ci-ssh","host":"127.0.0.1","protocol":"ssh","sshUser":"runner","sshKeyPath":"${{ runner.temp }}/id_ed25519","sshPort":2222,"scoutReadRoots":["/tmp"]}]
+        run: |
+          cargo build --locked
+          target/debug/synapse serve mcp >"$RUNNER_TEMP/synapse.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          bash scripts/test-live-jsonrpc.sh
 
   # ── web: pnpm install, lint, audit, static build ─────────────────────────────
   web:
@@ -129,6 +212,9 @@ jobs:
 
       - name: pnpm typecheck
         run: pnpm typecheck
+
+      - name: pnpm test
+        run: pnpm test
 
       - name: pnpm build
         run: pnpm build
@@ -159,8 +245,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust (stable)
+      - name: Install Rust 1.90
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.90.0
 
       - name: Check PATTERNS.md contracts
         run: cargo xtask patterns
@@ -209,6 +297,9 @@ jobs:
           command: check
           arguments: --all-features
 
+      - name: Enforce time-bounded yanked exceptions
+        run: python3 scripts/check-yanked-exceptions.py
+
   # ── gitleaks: secret scanning ─────────────────────────────────────────────────
   gitleaks:
     name: Secret Scan
@@ -231,8 +322,8 @@ jobs:
     name: npm launcher
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - name: Test npm launcher
@@ -241,3 +332,27 @@ jobs:
         run: npm run check --prefix packages/synapse-rmcp
       - name: Dry-run npm package
         run: npm pack --dry-run --json ./packages/synapse-rmcp
+
+  container:
+    name: Container smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Resolve production Compose
+        env:
+          DOCKER_GID: "999"
+        run: docker compose -f docker-compose.prod.yml config --quiet
+      - name: Build deployable image
+        run: docker build -f config/Dockerfile -t synapse2:ci .
+      - name: Smoke liveness
+        run: |
+          docker run -d --rm --name synapse2-ci -p 127.0.0.1:40080:40080 \
+            -e SYNAPSE_MCP_HOST=0.0.0.0 \
+            -e SYNAPSE_MCP_TOKEN=ci-smoke-token-with-sufficient-length synapse2:ci
+          trap 'docker logs synapse2-ci; docker stop synapse2-ci >/dev/null' EXIT
+          for _attempt in {1..30}; do
+            curl -fsS http://127.0.0.1:40080/health && exit 0
+            sleep 1
+          done
+          exit 1

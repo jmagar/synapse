@@ -25,7 +25,6 @@ pub mod cli;
 pub mod color_policy;
 pub mod compose;
 pub mod config;
-pub mod docker;
 pub mod docker_client;
 pub mod elicitation_gate;
 pub mod fanout;

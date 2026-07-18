@@ -16,7 +16,7 @@ resolver = "2"
 
 [package]
 name = "synapse2"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 rust-version = "1.90"
 categories = ["command-line-utilities", "development-tools"]
@@ -119,6 +119,7 @@ strip = "symbols"
 
 [dev-dependencies]
 synapse2 = { path = ".", features = ["test-support"] }
+tokio = { version = "1", features = ["test-util"] }
 # Bytes is bollard's payload type for LogOutput frames; needed to construct
 # canned log frames in B8 container_read unit tests.
 bytes = "1"

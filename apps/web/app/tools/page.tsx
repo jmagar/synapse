@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ParamInput } from "@/components/tools/param-input";
 import { ResponsePanel } from "@/components/tools/response-panel";
 import { SubmitButton } from "@/components/tools/submit-button";
 import { Button } from "@/components/ui/button";
-import { callAction } from "@/lib/api";
+import { callAction, clearBearerToken, getBearerToken, setBearerToken } from "@/lib/api";
 import {
   type ActionParam,
   DEFAULT_REST_ACTION,
@@ -20,6 +20,10 @@ export default function ToolsPage() {
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [hasCredential, setHasCredential] = useState(false);
+
+  useEffect(() => setHasCredential(Boolean(getBearerToken())), []);
 
   const action = REST_ACTIONS.find((a) => a.id === selectedAction) ?? DEFAULT_REST_ACTION;
   const requestPreview = {
@@ -46,11 +50,31 @@ export default function ToolsPage() {
     setLoading(false);
 
     if (res.error) {
-      setResponse(JSON.stringify({ error: res.error }, null, 2));
+      const authHint =
+        res.status === 401
+          ? "The browser credential is missing, expired, or invalid."
+          : res.status === 403
+            ? "The credential is valid but lacks the scope required for this action."
+            : undefined;
+      setResponse(
+        JSON.stringify({ error: res.error, status: res.status, hint: authHint }, null, 2),
+      );
       setIsError(true);
     } else {
       setResponse(JSON.stringify(res.data, null, 2));
     }
+  };
+
+  const saveCredential = () => {
+    setBearerToken(tokenDraft);
+    setHasCredential(Boolean(tokenDraft.trim()));
+    setTokenDraft("");
+  };
+
+  const removeCredential = () => {
+    clearBearerToken();
+    setHasCredential(false);
+    setTokenDraft("");
   };
 
   return (
@@ -135,6 +159,37 @@ export default function ToolsPage() {
 
         {/* Form + response */}
         <div className="md:col-span-2 space-y-4">
+          <section
+            aria-label="Browser authentication"
+            className="rounded-lg border p-4"
+            style={{ background: "var(--aurora-panel-medium)" }}
+          >
+            <p className="text-sm font-semibold">Browser authentication</p>
+            <p className="mt-1 text-xs" style={{ color: "var(--aurora-text-muted)" }}>
+              {hasCredential
+                ? "A bearer credential is stored for this browser tab. Static bearer credentials are read-only; OAuth or gateway authorization is required for writes."
+                : "Protected actions are disabled until you provide a bearer credential. The credential is kept only in session storage."}
+            </p>
+            <div className="mt-3 flex gap-2">
+              <input
+                aria-label="Bearer token"
+                type="password"
+                value={tokenDraft}
+                onChange={(event) => setTokenDraft(event.target.value)}
+                placeholder="Bearer token"
+                className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
+                style={{ background: "var(--aurora-control-surface)" }}
+              />
+              <Button type="button" onClick={saveCredential} disabled={!tokenDraft.trim()}>
+                Save
+              </Button>
+              {hasCredential && (
+                <Button type="button" variant="ghost" onClick={removeCredential}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </section>
           <form
             onSubmit={handleSubmit}
             style={{
@@ -212,7 +267,10 @@ export default function ToolsPage() {
               </p>
             )}
 
-            <SubmitButton loading={loading} />
+            <SubmitButton
+              loading={loading}
+              disabled={action.scope !== "public" && !hasCredential}
+            />
           </form>
 
           {response !== null && <ResponsePanel response={response} isError={isError} />}

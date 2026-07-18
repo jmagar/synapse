@@ -74,7 +74,16 @@ fi
 
 printf 'Downloading %s
 ' "${url}" >&2
-curl -fsSL "${url}" -o "${tmpdir}/${asset}"
+case "${url}" in https://*) ;; *) printf 'error: refusing non-HTTPS URL: %s\n' "${url}" >&2; exit 1 ;; esac
+curl --proto '=https' --proto-redir '=https' --max-redirs 5 --connect-timeout 15 --max-time 120 -fsSL "${url}" -o "${tmpdir}/${asset}"
+curl --proto '=https' --proto-redir '=https' --max-redirs 5 --connect-timeout 15 --max-time 30 -fsSL "${url}.sha256" -o "${tmpdir}/${asset}.sha256"
+(cd "${tmpdir}" && sha256sum --check --strict "${asset}.sha256")
+listing="$(tar -tzvf "${tmpdir}/${asset}")"
+entry="${listing##* }"
+if [[ "$(printf '%s\n' "${listing}" | wc -l)" -ne 1 || "${listing:0:1}" != "-" || ( "${entry}" != "synapse" && "${entry}" != "./synapse" ) ]]; then
+  printf 'error: archive must contain exactly one synapse binary\n' >&2
+  exit 1
+fi
 tar -xzf "${tmpdir}/${asset}" -C "${tmpdir}"
 
 binary="${tmpdir}/${BINARY_NAME}"

@@ -127,6 +127,8 @@ async fn serve_mcp() -> Result<()> {
     );
 
     let bind = state.config.bind_addr();
+    let service = state.service.clone();
+    let eviction = service.start_runtime();
     let app = server::router(state).layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     info!(bind = %bind, "MCP HTTP server listening");
@@ -134,6 +136,9 @@ async fn serve_mcp() -> Result<()> {
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    eviction.abort();
+    let _ = eviction.await;
+    service.shutdown().await;
     Ok(())
 }
 
@@ -145,13 +150,17 @@ async fn serve_mcp() -> Result<()> {
 async fn serve_stdio_mcp() -> Result<()> {
     let config = Config::load()?;
     let service = SynapseService::new();
+    let eviction = service.start_runtime();
     let state = AppState {
         config: config.mcp,
         auth_policy: AuthPolicy::LoopbackDev, // stdio = trusted local transport
-        service,
+        service: service.clone(),
     };
     let svc = mcp::rmcp_server(state).serve(stdio()).await?;
     svc.waiting().await?;
+    eviction.abort();
+    let _ = eviction.await;
+    service.shutdown().await;
     Ok(())
 }
 

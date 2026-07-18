@@ -6,6 +6,7 @@
 //! `container_lifecycle`. Both pure modules are unit-testable with `MockDockerClient`.
 
 use anyhow::Result;
+use futures::StreamExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -119,15 +120,38 @@ impl FluxService {
                             }
                             e.to_string()
                         })?;
-                let mut stats = Vec::new();
-                for c in &containers {
-                    if let Some(id) = c.get("id").and_then(Value::as_str)
-                        && let Ok(s) =
-                            container_read::stats_on_host(client.as_ref(), &h.name, id).await
-                    {
-                        stats.push(s);
-                    }
-                }
+                let ids: Vec<String> = containers
+                    .iter()
+                    .filter_map(|c| c.get("id").and_then(Value::as_str).map(ToOwned::to_owned))
+                    .collect();
+                let mut stats: Vec<(usize, Value)> =
+                    futures::stream::iter(ids.into_iter().enumerate())
+                        .map(|(index, id)| {
+                            let client = Arc::clone(&client);
+                            let host_name = h.name.clone();
+                            async move {
+                                let value = match container_read::stats_on_host(
+                                    client.as_ref(),
+                                    &host_name,
+                                    &id,
+                                )
+                                .await
+                                {
+                                    Ok(value) => value,
+                                    Err(error) => json!({
+                                        "host": host_name,
+                                        "container_id": id,
+                                        "error": error.to_string(),
+                                    }),
+                                };
+                                (index, value)
+                            }
+                        })
+                        .buffer_unordered(8)
+                        .collect()
+                        .await;
+                stats.sort_unstable_by_key(|(index, _)| *index);
+                let stats = stats.into_iter().map(|(_, value)| value).collect();
                 Ok::<_, String>(stats)
             }
         })
@@ -192,14 +216,16 @@ impl FluxService {
     ) -> Result<Value>
     where
         F: for<'a> Fn(
-            &'a dyn crate::docker_client::ContainerOps,
-            &'a str,
-            &'a str,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, bollard::errors::Error>> + Send + 'a,
-            >,
-        >,
+                &'a dyn crate::docker_client::ContainerOps,
+                &'a str,
+                &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<Value, bollard::errors::Error>>
+                        + Send
+                        + 'a,
+                >,
+            > + Sync,
     {
         let hosts = self.target_hosts(host)?;
         // Named host → target directly (surface its error verbatim).
@@ -217,20 +243,32 @@ impl FluxService {
                 });
         }
         // Unspecified → probe hosts, first that has the container wins.
-        let mut errors: Vec<String> = Vec::new();
-        for h in &hosts {
-            match self.docker_clients.client_for(h).await {
-                Ok(client) => match op(client.as_ref(), &h.name, container_id).await {
-                    Ok(value) => return Ok(value),
-                    Err(e) => {
-                        // Evict stale SSH-forwarded socket so next call rebuilds (T-H3).
-                        if is_transport_dead(&e) {
-                            self.docker_clients.invalidate(h);
+        let mut probes = futures::stream::iter(hosts)
+            .map(|h| {
+                let op = &op;
+                async move {
+                    let result = match self.docker_clients.client_for(&h).await {
+                        Ok(client) => {
+                            op(client.as_ref(), &h.name, container_id)
+                                .await
+                                .map_err(|error| {
+                                    if is_transport_dead(&error) {
+                                        self.docker_clients.invalidate(&h);
+                                    }
+                                    anyhow::Error::from(error)
+                                })
                         }
-                        errors.push(format!("{}: {e}", h.name));
-                    }
-                },
-                Err(e) => errors.push(format!("{}: {e}", h.name)),
+                        Err(error) => Err(error),
+                    };
+                    (h.name, result)
+                }
+            })
+            .buffer_unordered(8);
+        let mut errors = Vec::new();
+        while let Some((host_name, result)) = probes.next().await {
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error) => errors.push(format!("{host_name}: {error}")),
             }
         }
         Err(anyhow::anyhow!(
@@ -317,15 +355,23 @@ impl FluxService {
         let h = if host.is_some() {
             hosts[0].clone()
         } else {
-            // Fan out to find owning host.
-            let mut found_host: Option<crate::synapse::HostConfig> = None;
-            for candidate in &hosts {
-                if let Ok(client) = self.docker_clients.client_for(candidate).await {
-                    let probe: &dyn ContainerOps = client.as_ref();
-                    if probe.inspect_container(container_id, None).await.is_ok() {
-                        found_host = Some(candidate.clone());
-                        break;
-                    }
+            let mut probes = futures::stream::iter(hosts)
+                .map(|candidate| async move {
+                    let found = match self.docker_clients.client_for(&candidate).await {
+                        Ok(client) => {
+                            let probe: &dyn ContainerOps = client.as_ref();
+                            probe.inspect_container(container_id, None).await.is_ok()
+                        }
+                        Err(_) => false,
+                    };
+                    found.then_some(candidate)
+                })
+                .buffer_unordered(8);
+            let mut found_host = None;
+            while let Some(candidate) = probes.next().await {
+                if candidate.is_some() {
+                    found_host = candidate;
+                    break;
                 }
             }
             found_host

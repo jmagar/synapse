@@ -158,6 +158,14 @@ async fn status_returns_only_local_redacted_metadata() {
     assert!(body.get("api_key").is_none(), "{body}");
 }
 
+#[tokio::test]
+async fn readiness_is_separate_from_liveness() {
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(app, Method::GET, "/ready", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ready");
+}
+
 /// Destructive REST actions (no elicitation channel) must return 403, not 500.
 ///
 /// `flux.docker.prune` is write-scoped and confirmer-gated. On loopback state

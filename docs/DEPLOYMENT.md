@@ -75,9 +75,9 @@ fn resolve_data_dir(config_path: Option<&str>) -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".synapse2")
 }
 
-fn resolve_bind_host(configured: &str) -> &str {
-    if is_containerized() { "0.0.0.0" } else { configured }
-}
+// Bind behavior is explicit in every environment. The binary default remains
+// 127.0.0.1; Compose sets SYNAPSE_MCP_HOST=0.0.0.0 inside the container when a
+// published container port is required.
 ```
 
 ## Appdata convention

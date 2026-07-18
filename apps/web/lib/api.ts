@@ -13,6 +13,25 @@ import { endpoint, WEB_APP_CONFIG } from "@/lib/template";
 export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
+  status?: number;
+}
+
+const BEARER_TOKEN_KEY = "synapse2.bearer-token";
+
+export function getBearerToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.sessionStorage.getItem(BEARER_TOKEN_KEY);
+}
+
+export function setBearerToken(token: string): void {
+  if (typeof window === "undefined") return;
+  const normalized = token.trim();
+  if (normalized) window.sessionStorage.setItem(BEARER_TOKEN_KEY, normalized);
+  else window.sessionStorage.removeItem(BEARER_TOKEN_KEY);
+}
+
+export function clearBearerToken(): void {
+  if (typeof window !== "undefined") window.sessionStorage.removeItem(BEARER_TOKEN_KEY);
 }
 
 export interface StatusResult {
@@ -36,7 +55,7 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<A
     if (!res.ok) {
       const error =
         isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
-      return { error };
+      return { error, status: res.status };
     }
     return { data: json as T };
   } catch (e) {
@@ -62,19 +81,24 @@ export function callAction<T = unknown>(
   action: string,
   params: Record<string, unknown> = {},
 ): Promise<ApiResponse<T>> {
+  const token = getBearerToken();
   return apiFetch<T>(endpoint(WEB_APP_CONFIG.restEndpoint), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ action, params }),
   });
 }
 
 /** GET /health */
-export function getHealth(): Promise<ApiResponse<HealthResult>> {
-  return apiFetch<HealthResult>(endpoint(WEB_APP_CONFIG.healthEndpoint));
+export function getHealth(signal?: AbortSignal): Promise<ApiResponse<HealthResult>> {
+  return apiFetch<HealthResult>(endpoint(WEB_APP_CONFIG.healthEndpoint), { signal });
 }
 
 /** GET /status */
-export function getStatus(): Promise<ApiResponse<StatusResult>> {
-  return apiFetch<StatusResult>(endpoint(WEB_APP_CONFIG.statusEndpoint));
+export function getStatus(signal?: AbortSignal): Promise<ApiResponse<StatusResult>> {
+  return apiFetch<StatusResult>(endpoint(WEB_APP_CONFIG.statusEndpoint), { signal });
 }

@@ -13,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 CARGO = ROOT / "Cargo.toml"
 ACTIONS = ROOT / "src/actions.rs"
+REST_ACTIONS_SOURCE = ROOT / "src/actions/rest.rs"
 OUT = ROOT / "docs/generated/openapi.json"
 
 REST_ENDPOINT = "/v1/synapse2"
@@ -25,24 +26,6 @@ _PARAM_EXAMPLES: dict[str, dict] = {
     "scout.peek": {"host": "myhost", "path": "/etc/hostname"},
     "scout.exec": {"host": "myhost", "path": "/tmp", "command": "hostname"},
 }
-
-REST_ACTIONS: list[dict[str, str]] = [
-    {"name": "help", "scope": "public", "transport": "Any"},
-    {"name": "flux.docker.info", "scope": "synapse:read", "transport": "Any"},
-    {"name": "flux.docker.df", "scope": "synapse:read", "transport": "Any"},
-    {"name": "flux.docker.images", "scope": "synapse:read", "transport": "Any"},
-    {"name": "flux.docker.networks", "scope": "synapse:read", "transport": "Any"},
-    {"name": "flux.docker.volumes", "scope": "synapse:read", "transport": "Any"},
-    {"name": "flux.docker.pull", "scope": "synapse:write", "transport": "Any"},
-    {"name": "flux.docker.build", "scope": "synapse:write", "transport": "Any"},
-    {"name": "flux.docker.rmi", "scope": "synapse:write", "transport": "Any"},
-    {"name": "flux.docker.prune", "scope": "synapse:write", "transport": "Any"},
-    {"name": "flux.container.list", "scope": "synapse:read", "transport": "Any"},
-    {"name": "scout.nodes", "scope": "synapse:read", "transport": "Any"},
-    {"name": "scout.peek", "scope": "synapse:read", "transport": "Any"},
-    {"name": "scout.exec", "scope": "synapse:write", "transport": "Any"},
-]
-
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -89,8 +72,34 @@ def action_spec_count() -> int:
     return len(re.findall(r"ActionSpec\s*\{\s*name:", read(ACTIONS)))
 
 
-def rest_actions() -> list[dict[str, str]]:
-    return REST_ACTIONS
+def rest_actions() -> list[dict[str, Any]]:
+    text = read(REST_ACTIONS_SOURCE)
+    pattern = re.compile(
+        r'rest_operation!\(\s*"([^"]+)"\s*,\s*\w+\s*,\s*"[^"]+"\s*,\s*'
+        r'(?:None|Some\("[^"]+"\))\s*,\s*'
+        r'(None|Some\(super::(?:READ_SCOPE|WRITE_SCOPE)\))\s*,\s*'
+        r'(true|false)\s*,\s*\[(.*?)\]\s*\)',
+        re.S,
+    )
+    actions: list[dict[str, Any]] = []
+    for name, scope_expr, destructive, required_text in pattern.findall(text):
+        scope = "public"
+        if "READ_SCOPE" in scope_expr:
+            scope = "synapse:read"
+        elif "WRITE_SCOPE" in scope_expr:
+            scope = "synapse:write"
+        actions.append(
+            {
+                "name": name,
+                "scope": scope,
+                "transport": "Any",
+                "destructive": destructive == "true",
+                "required_params": re.findall(r'"([^"]+)"', required_text),
+            }
+        )
+    if not actions:
+        raise RuntimeError("could not parse REST_OPERATION_SPECS from src/actions/rest.rs")
+    return actions
 
 
 def schema_ref(name: str) -> dict[str, str]:
@@ -323,8 +332,9 @@ def render() -> dict[str, Any]:
         },
         "x-template": {
             "source": "scripts/check-openapi.py",
-            "action_metadata": "src/actions.rs",
+            "action_metadata": "src/actions/rest.rs",
             "rest_actions": action_names,
+            "rest_operations": actions,
             "mcp_actions": [action["name"] for action in action_entries()],
             "mcp_only_actions": [action["name"] for action in action_entries() if action["transport"] == "McpOnly"],
         },
@@ -360,6 +370,8 @@ def validate_openapi(value: dict[str, Any]) -> list[str]:
         failures.append(
             f"x-template rest_actions drifted: expected {expected}, got {x_template.get('rest_actions')}"
         )
+    if x_template.get("rest_operations") != rest_actions():
+        failures.append("x-template rest_operations drifted from src/actions/rest.rs")
     expected_mcp_actions = [action["name"] for action in entries]
     if x_template.get("mcp_actions") != expected_mcp_actions:
         failures.append("x-template mcp_actions drifted")

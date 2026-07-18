@@ -53,7 +53,7 @@ impl DockerClientCache {
     pub async fn client_for(&self, host: &HostConfig) -> Result<Arc<BollardClient>> {
         let cell = self
             .clients
-            .entry(host.name.clone())
+            .entry(host.connection_key())
             .or_insert_with(|| Arc::new(OnceCell::new()))
             .clone();
 
@@ -80,7 +80,7 @@ impl DockerClientCache {
     /// next [`client_for`](Self::client_for) rebuilds against a fresh tunnel
     /// (HIGH, perf-oracle). Dropping the `BollardClient` tears down its forward.
     pub fn invalidate(&self, host: &HostConfig) {
-        self.clients.remove(&host.name);
+        self.clients.remove(&host.connection_key());
         self.pool.invalidate(host);
     }
 

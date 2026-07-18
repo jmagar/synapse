@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 mod dispatch;
 mod flux;
+pub mod rest;
 pub(crate) mod scout;
 
 // ── Re-exports (keep crate::actions::X resolving for all callers) ─────────────
@@ -196,17 +197,11 @@ pub fn is_known_action(action: &str) -> bool {
 }
 
 pub fn rest_action_names() -> Vec<&'static str> {
-    ACTION_SPECS
-        .iter()
-        .filter(|spec| spec.transport == ActionTransport::Any)
-        .map(|spec| spec.name)
-        .collect()
+    rest::action_names()
 }
 
 pub fn is_rest_action(action: &str) -> bool {
-    action_spec(action)
-        .map(|spec| spec.transport == ActionTransport::Any)
-        .unwrap_or(false)
+    rest::operation(action).is_some()
 }
 
 pub fn mcp_only_action_names() -> Vec<&'static str> {
@@ -337,7 +332,7 @@ impl SynapseAction {
 
 pub fn rest_help() -> Value {
     json!({
-        "actions": rest_action_names(),
+        "actions": rest::action_names(),
         "mcp_only_actions": mcp_only_action_names(),
         "usage": "Use MCP tools `flux` and `scout`, or CLI commands `synapse2 flux ...` and `synapse2 scout ...`.",
         "examples": {

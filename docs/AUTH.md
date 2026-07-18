@@ -13,11 +13,17 @@ HTTP auth.
 no session cookie, just a shared secret. Tokens are fast to issue
 (`just gen-token`) and easy to rotate.
 
+Static bearer tokens are deliberately granted `synapse:read` only. They cannot
+authorize HTTP writes or destructive operations. Use OAuth JWTs carrying
+`synapse:write`, or an external gateway that performs equivalent authorization,
+for write access.
+
 **OAuth** is for humans. It runs a browser-based Google OAuth flow, issues
 short-lived JWTs, and maintains refresh tokens. This is the right choice when a
 human user needs to grant access through a UI without seeing a raw token.
 
-When both are configured, each request is accepted if it satisfies either mechanism. A human signs in via OAuth; an agent uses a token. They share the same server.
+When both are configured, each request is accepted only when that credential
+also satisfies the action scope. A static token remains read-only.
 
 ---
 

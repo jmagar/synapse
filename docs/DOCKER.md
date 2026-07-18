@@ -40,7 +40,7 @@ just runtime-current   # compare running service with the local binary
 |---|---|
 | `web` | Build `apps/web/out` with pnpm. |
 | `builder` | Compile package `synapse2` and copy `target/release/synapse` to `/usr/local/bin/synapse`. |
-| `runtime` | Minimal Debian runtime with `curl`, `gosu`, `openssh-client`, and Docker CLI support. |
+| `runtime` | Minimal Debian runtime with `curl`, `gosu`, and `openssh-client`. Docker access uses Bollard over the mounted socket; the Docker CLI is not installed. |
 
 The runtime image exposes `40080/tcp`, healthchecks `http://localhost:40080/health`,
 and starts with:
@@ -71,7 +71,7 @@ services:
       SYNAPSE_MCP_PORT: "40080"
       SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:-}"
     ports:
-      - "${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
+      - "${SYNAPSE_MCP_BIND_HOST:-127.0.0.1}:${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:
       - ${HOME}/.synapse2:/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -87,6 +87,9 @@ Key requirements:
 - Set `DOCKER_GID` when mounting `/var/run/docker.sock`; otherwise `flux` Docker
   actions will not reach the daemon.
 - Set `SYNAPSE_MCP_TOKEN` for bearer deployments, or configure OAuth explicitly.
+- `SYNAPSE_MCP_HOST=0.0.0.0` is the container-internal bind. Keep the host
+  publish address at `SYNAPSE_MCP_BIND_HOST=127.0.0.1` unless an authenticated
+  reverse proxy or firewall is the explicit network boundary.
 - Mount `~/.ssh` read-only at `/home/synapse/.ssh` so `scout` host discovery can
   read the operator SSH config.
 
