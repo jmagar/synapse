@@ -41,9 +41,24 @@ fn plugin_manifests_share_identity_and_connection_settings() {
     assert_eq!(codex["name"], "synapse2");
     assert_eq!(gemini["name"], "synapse2");
 
-    assert!(claude["repository"].as_str().unwrap().ends_with("synapse2"));
-    assert!(codex["repository"].as_str().unwrap().ends_with("synapse2"));
-    assert!(gemini["repository"].as_str().unwrap().ends_with("synapse2"));
+    assert!(
+        claude["repository"]
+            .as_str()
+            .unwrap()
+            .ends_with("synapse-rmcp")
+    );
+    assert!(
+        codex["repository"]
+            .as_str()
+            .unwrap()
+            .ends_with("synapse-rmcp")
+    );
+    assert!(
+        gemini["repository"]
+            .as_str()
+            .unwrap()
+            .ends_with("synapse-rmcp")
+    );
 
     let user_config = claude["userConfig"].as_object().unwrap();
     for key in [
@@ -141,10 +156,11 @@ fn plugin_hook_standard_is_documented() {
     }
 }
 
-fn synapse2_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_synapse")
-        .or_else(|_| std::env::var("CARGO_BIN_EXE_synapse2"))
-        .unwrap_or_else(|_| "target/debug/synapse".to_string())
+fn synapse2_bin() -> &'static str {
+    // Cargo exposes integration-test binaries at compile time. Using a runtime
+    // lookup with a target/debug fallback is unreliable for alternate target
+    // directories such as cargo-llvm-cov's target/llvm-cov-target.
+    env!("CARGO_BIN_EXE_synapse")
 }
 
 fn setup_command(data_dir: &std::path::Path) -> Command {

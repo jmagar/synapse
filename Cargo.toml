@@ -16,10 +16,14 @@ resolver = "2"
 
 [package]
 name = "synapse2"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 rust-version = "1.90"
-description = "Rust MCP and CLI server for local Synapse workflows (flux + scout tools)"
+categories = ["command-line-utilities", "development-tools"]
+keywords = ["mcp", "docker", "ssh", "zfs", "homelab"]
+repository = "https://github.com/jmagar/synapse-rmcp"
+homepage = "https://github.com/jmagar/synapse-rmcp#readme"
+description = "Rust MCP and CLI server for local Synapse workflows: Docker/Compose control, host inspection, SSH, logs, ZFS, and files."
 autobins = false
 
 [[bin]]
@@ -103,6 +107,9 @@ futures-util = "0.3"
 # Static asset embedding (web UI)
 include_dir = { version = "0.7", optional = true }
 
+# Descriptor-relative filesystem access for Scout read-root confinement.
+rustix = { version = "1", features = ["fs"] }
+
 [features]
 default = ["web"]
 web = ["include_dir"]
@@ -115,6 +122,7 @@ strip = "symbols"
 
 [dev-dependencies]
 synapse2 = { path = ".", features = ["test-support"] }
+tokio = { version = "1", features = ["test-util"] }
 # Bytes is bollard's payload type for LogOutput frames; needed to construct
 # canned log frames in B8 container_read unit tests.
 bytes = "1"

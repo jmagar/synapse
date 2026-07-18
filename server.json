@@ -1,68 +1,117 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "tv.tootie/synapse2",
-  "title": "Synapse2",
-  "description": "Local Docker, Compose, host, SSH, log, ZFS, and file operations for MCP agents.",
+  "name": "ai.dinglebear/synapse-rmcp",
+  "title": "Synapse RMCP",
+  "description": "Rust MCP and CLI server for Docker, host inspection, SSH, logs, ZFS, and safe file operations.",
+  "version": "0.5.4",
+  "websiteUrl": "https://github.com/jmagar/synapse-rmcp",
   "repository": {
-    "url": "https://github.com/jmagar/synapse2",
-    "source": "github"
+    "url": "https://github.com/jmagar/synapse-rmcp",
+    "source": "github",
+    "id": "1247261737"
   },
-  "version": "0.5.2",
+  "icons": [
+    {
+      "src": "https://avatars.githubusercontent.com/u/38927646?v=4",
+      "mimeType": "image/png",
+      "sizes": [
+        "460x460"
+      ],
+      "theme": "dark"
+    }
+  ],
   "packages": [
     {
-      "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/synapse2:0.5.2",
-      "version": "0.5.2",
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "synapse-rmcp",
+      "version": "0.5.4",
+      "runtimeHint": "npx",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run Synapse RMCP over stdio.",
+          "format": "string",
+          "isRequired": true,
+          "isSecret": false,
+          "isRepeated": false
+        }
+      ],
       "environmentVariables": [
         {
-          "name": "SYNAPSE_MCP_TOKEN",
-          "description": "Static bearer token for /mcp authentication when running mounted HTTP in bearer mode.",
+          "name": "SYNAPSE_HOME",
+          "description": "Optional Synapse appdata directory.",
+          "format": "string",
           "isRequired": false,
-          "isSecret": true
+          "isSecret": false,
+          "placeholder": "~/.synapse2"
         },
         {
           "name": "SYNAPSE_HOSTS_CONFIG",
-          "description": "Optional inline JSON host topology. If unset, Synapse2 discovers SSH hosts from ~/.ssh/config and appends the built-in local host.",
+          "description": "Inline host topology as a JSON array.",
+          "format": "string",
           "isRequired": false,
           "isSecret": false
         },
         {
           "name": "SYNAPSE_CONFIG_FILE",
-          "description": "Optional path to a JSON host topology file with a top-level hosts array.",
+          "description": "Path to a host configuration file.",
+          "format": "string",
           "isRequired": false,
           "isSecret": false
         },
         {
-          "name": "SYNAPSE_MCP_AUTH_MODE",
-          "description": "Authentication mode for mounted HTTP: bearer or oauth.",
+          "name": "SYNAPSE_RMCP_VERSION",
+          "description": "Optional GitHub release tag override for the downloaded Synapse binary.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "placeholder": "v0.5.3"
+        },
+        {
+          "name": "SYNAPSE_RMCP_REPO",
+          "description": "Optional GitHub owner/repo override for release asset downloads.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "jmagar/synapse-rmcp",
+          "placeholder": "jmagar/synapse-rmcp"
+        },
+        {
+          "name": "SYNAPSE_RMCP_RELEASE_BASE_URL",
+          "description": "Optional release download base URL override.",
+          "format": "string",
           "isRequired": false,
           "isSecret": false
         },
         {
-          "name": "SYNAPSE_MCP_PUBLIC_URL",
-          "description": "Public HTTPS base URL required when OAuth mode is enabled.",
+          "name": "RUST_LOG",
+          "description": "Tracing filter for Synapse logs.",
+          "format": "string",
           "isRequired": false,
-          "isSecret": false
-        },
-        {
-          "name": "SYNAPSE_MCP_GOOGLE_CLIENT_ID",
-          "description": "Google OAuth client ID, required only when OAuth mode is enabled.",
-          "isRequired": false,
-          "isSecret": false
-        },
-        {
-          "name": "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET",
-          "description": "Google OAuth client secret, required only when OAuth mode is enabled.",
-          "isRequired": false,
-          "isSecret": true
-        },
-        {
-          "name": "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",
-          "description": "Initial admin Google account email, required only when OAuth mode is enabled.",
-          "isRequired": false,
-          "isSecret": false
+          "isSecret": false,
+          "default": "info,rmcp=warn",
+          "placeholder": "info,rmcp=warn"
         }
-      ]
+      ],
+      "transport": {
+        "type": "stdio"
+      }
     }
-  ]
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "namespace": "ai.dinglebear",
+      "dnsDomain": "dinglebear.ai",
+      "distribution": {
+        "npm": "synapse-rmcp@0.5.4",
+        "nodePackage": "synapse-rmcp"
+      },
+      "buildInfo": {
+        "version": "0.5.4",
+        "repository": "https://github.com/jmagar/synapse-rmcp"
+      }
+    }
+  }
 }
