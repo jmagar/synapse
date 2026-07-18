@@ -169,6 +169,27 @@ async fn exec_rejects_non_allowlisted_command() {
     );
 }
 
+#[tokio::test]
+async fn exec_local_reads_through_bound_descriptor() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("value.txt");
+    std::fs::write(&path, "descriptor-safe").unwrap();
+    let mut host = HostConfig::local();
+    host.scout_read_roots = vec![dir.path().to_string_lossy().into_owned()];
+
+    let result = super::exec(
+        &host,
+        &AlwaysOkExec,
+        &ApproveConfirmer,
+        "cat",
+        &[path.to_string_lossy().into_owned()],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["stdout"], "descriptor-safe");
+}
+
 #[tokio::test(start_paused = true)]
 async fn exec_enforces_requested_timeout() {
     let mut host = HostConfig::local();

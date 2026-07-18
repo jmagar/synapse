@@ -1,7 +1,13 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::path::{Component, Path};
+
+mod command_policy;
+
+pub(crate) use command_policy::command_filesystem_operand_indices;
+pub use command_policy::{
+    ALLOWED_READ_COMMANDS, EXEC_DENYLIST, validate_command, validate_command_args,
+};
 
 #[cfg(test)]
 #[path = "synapse_tests.rs"]
@@ -91,18 +97,6 @@ fn default_protocol() -> HostProtocol {
 pub struct HostsFile {
     pub hosts: Vec<HostConfig>,
 }
-
-pub const ALLOWED_READ_COMMANDS: &[&str] = &[
-    "cat", "head", "tail", "grep", "rg", "ls", "tree", "wc", "uniq", "diff", "stat", "file", "du",
-    "df", "pwd", "hostname", "uptime", "whoami",
-];
-
-pub const EXEC_DENYLIST: &[&str] = &[
-    "sh", "bash", "zsh", "dash", "sudo", "su", "doas", "python", "python3", "perl", "ruby", "node",
-    "lua", "php", "curl", "wget", "nc", "ncat", "socat", "rm", "dd", "mkfs", "cp", "mv", "chmod",
-    "chown", "docker", "podman", "kubectl", "kill", "pkill", "env", "xargs", "awk", "sed", "vi",
-    "vim", "nano", "cargo", "rustc", "apt", "apk", "dnf",
-];
 
 pub fn validate_safe_path(path: &str) -> Result<()> {
     if path.is_empty() {
@@ -234,82 +228,3 @@ fn path_is_under_root(path: &str, root: &str) -> bool {
             .strip_prefix(root)
             .is_some_and(|rest| rest.starts_with('/'))
 }
-
-pub fn validate_command(command: &str, host_allowlist: &[String]) -> Result<()> {
-    if command.is_empty()
-        || !command
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        bail!("command name is invalid");
-    }
-    let deny: BTreeSet<&str> = EXEC_DENYLIST.iter().copied().collect();
-    if deny.contains(command) {
-        bail!("command is denied");
-    }
-    let allowed: BTreeSet<&str> = ALLOWED_READ_COMMANDS.iter().copied().collect();
-    if allowed.contains(command) || host_allowlist.iter().any(|c| c == command) {
-        return Ok(());
-    }
-    bail!("command is not allowlisted");
-}
-
-/// Validate the typed argv policy for a read-only Scout command.
-///
-/// The executable allowlist is only the first boundary. Options that execute a
-/// helper or load arbitrary configuration are denied, and every filesystem
-/// operand is checked against the host's read roots.
-pub fn validate_command_args(host: &HostConfig, command: &str, args: &[&str]) -> Result<()> {
-    validate_command(command, &host.exec_allowlist)?;
-    if args.iter().any(|arg| arg.contains('\0')) {
-        bail!("command arguments must not contain NUL bytes");
-    }
-
-    if command == "rg" {
-        const DENIED: &[&str] = &["--pre", "--config"];
-        for arg in args {
-            if DENIED
-                .iter()
-                .any(|flag| *arg == *flag || arg.starts_with(&format!("{flag}=")))
-            {
-                bail!("rg option {arg} is not permitted");
-            }
-        }
-    }
-
-    for index in command_filesystem_operand_indices(command, args) {
-        validate_scout_read_path(host, args[index])?;
-    }
-    Ok(())
-}
-
-pub(crate) fn command_filesystem_operand_indices(command: &str, args: &[&str]) -> Vec<usize> {
-    let path_commands = ["cat", "ls", "tree", "stat", "file", "du", "diff"];
-    if path_commands.contains(&command) {
-        return args
-            .iter()
-            .enumerate()
-            .filter_map(|(index, arg)| (!arg.starts_with('-')).then_some(index))
-            .collect();
-    }
-    if matches!(command, "grep" | "rg") {
-        let mut positional = args
-            .iter()
-            .enumerate()
-            .filter_map(|(index, arg)| (!arg.starts_with('-')).then_some(index));
-        let _pattern = positional.next();
-        return positional.collect();
-    }
-    if matches!(command, "head" | "tail") {
-        return args
-            .iter()
-            .enumerate()
-            .filter_map(|(index, arg)| arg.starts_with('/').then_some(index))
-            .collect();
-    }
-    Vec::new()
-}
-
-// load_hosts() and host_config_paths() have been moved to src/host_config.rs
-// as FileHostRepository / default_config_paths().
-// Use crate::host_config::FileHostRepository::default() for production loading.

@@ -122,6 +122,8 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@95cc2373c3f00275e315c306e56fef1c7a8854c0 # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
 
       - name: Enforce line coverage floor
         run: cargo llvm-cov --locked --workspace --all-features --fail-under-lines 65
@@ -145,18 +147,21 @@ jobs:
           sudo apt-get install -y openssh-server
           sudo ssh-keygen -A
           ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/id_ed25519"
-          cp "$RUNNER_TEMP/id_ed25519.pub" "$RUNNER_TEMP/authorized_keys"
-          chmod 600 "$RUNNER_TEMP/id_ed25519" "$RUNNER_TEMP/authorized_keys"
+          sudo useradd --create-home --shell /bin/bash synapse-ci
+          sudo install -d -m 700 -o synapse-ci -g synapse-ci /home/synapse-ci/.ssh
+          sudo install -m 600 -o synapse-ci -g synapse-ci \
+            "$RUNNER_TEMP/id_ed25519.pub" /home/synapse-ci/.ssh/authorized_keys
+          chmod 600 "$RUNNER_TEMP/id_ed25519"
           cat >"$RUNNER_TEMP/sshd_config" <<EOF
           Port 2222
           ListenAddress 127.0.0.1
           HostKey /etc/ssh/ssh_host_ed25519_key
-          AuthorizedKeysFile $RUNNER_TEMP/authorized_keys
+          AuthorizedKeysFile .ssh/authorized_keys
           PasswordAuthentication no
           PubkeyAuthentication yes
-          StrictModes no
+          StrictModes yes
           UsePAM no
-          AllowUsers $USER
+          AllowUsers synapse-ci
           EOF
           sudo mkdir -p /run/sshd
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/sshd.log"
@@ -170,7 +175,7 @@ jobs:
           SYNAPSE_TEST_SSH_REQUIRED: "1"
           SYNAPSE_TEST_SSH_HOST: 127.0.0.1
           SYNAPSE_TEST_SSH_PORT: "2222"
-          SYNAPSE_TEST_SSH_USER: runner
+          SYNAPSE_TEST_SSH_USER: synapse-ci
           SYNAPSE_TEST_SSH_KEY: ${{ runner.temp }}/id_ed25519
         run: cargo test --locked --test ssh_pool
 
@@ -179,7 +184,7 @@ jobs:
         env:
           SYNAPSE_MCP_NO_AUTH: "true"
           SYNAPSE_HOSTS_CONFIG: >-
-            [{"name":"ci-ssh","host":"127.0.0.1","protocol":"ssh","sshUser":"runner","sshKeyPath":"${{ runner.temp }}/id_ed25519","sshPort":2222,"scoutReadRoots":["/tmp"]}]
+            [{"name":"ci-ssh","host":"127.0.0.1","protocol":"ssh","sshUser":"synapse-ci","sshKeyPath":"${{ runner.temp }}/id_ed25519","sshPort":2222,"scoutReadRoots":["/tmp"]}]
         run: |
           cargo build --locked
           target/debug/synapse serve mcp >"$RUNNER_TEMP/synapse.log" 2>&1 &
@@ -268,6 +273,9 @@ jobs:
       - name: Check OpenAPI docs
         run: python3 scripts/check-openapi.py --check
 
+      - name: Check identity and operation registry contract
+        run: python3 scripts/check-identity-contract.py
+
       - name: Check scaffold intent contract
         run: python3 scripts/check-scaffold-intent-contract.py
 
@@ -296,6 +304,11 @@ jobs:
         with:
           command: check
           arguments: --all-features
+
+      - name: Install cargo-deny for exception guard
+        uses: taiki-e/install-action@95cc2373c3f00275e315c306e56fef1c7a8854c0
+        with:
+          tool: cargo-deny
 
       - name: Enforce time-bounded yanked exceptions
         run: python3 scripts/check-yanked-exceptions.py
@@ -356,3 +369,7 @@ jobs:
             sleep 1
           done
           exit 1
+      - name: Smoke container CLI entrypoint
+        run: |
+          docker run --rm synapse2:ci flux --help >/dev/null
+          docker run --rm synapse2:ci scout --help >/dev/null

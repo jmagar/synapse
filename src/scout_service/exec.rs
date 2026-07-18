@@ -33,7 +33,6 @@
 mod tests;
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,6 +45,22 @@ use crate::flux_service::host::is_local_host;
 use crate::ssh::SshExecutor;
 use crate::synapse::{HostConfig, validate_command, validate_command_args, validate_safe_path};
 use crate::synapse::{command_filesystem_operand_indices, validate_scout_read_path};
+
+const BOUND_EXEC_SCRIPT: &str = r#"import json, os, sys
+command, argv, specs, cwd = sys.argv[1], json.loads(sys.argv[2]), json.loads(sys.argv[3]), json.loads(sys.argv[4])
+fds = []
+def bind(root, rel):
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    for part in [p for p in root.split('/') if p] + [p for p in rel.split('/') if p]:
+        nxt = os.open(part, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+        os.close(fd); fd = nxt
+    os.set_inheritable(fd, True); fds.append(fd); return fd
+for spec in specs:
+    fd = bind(spec['root'], spec['relative'])
+    argv[spec['index']] = '/proc/self/fd/' + str(fd)
+if cwd: os.fchdir(bind(cwd['root'], cwd['relative']))
+os.execvp(command, [command] + argv)
+"#;
 
 /// Default timeout for Scout command execution.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -106,17 +121,12 @@ pub async fn exec_with_timeout(
         .clamp(1, MAX_TIMEOUT_SECS);
     let operation = async {
         if is_local_host(host) {
-            let canonical = canonical_command_args(host, command, &arg_strs, None).await?;
-            let refs = canonical.iter().map(String::as_str).collect::<Vec<_>>();
-            exec_local(host, command, &refs, path).await
+            exec_local(host, command, &arg_strs, path).await
         } else {
             if path.is_some() {
                 bail!("path is only supported for local scout exec targets");
             }
-            let canonical =
-                canonical_command_args(host, command, &arg_strs, Some(executor)).await?;
-            let refs = canonical.iter().map(String::as_str).collect::<Vec<_>>();
-            exec_remote(host, executor, command, &refs).await
+            exec_remote(host, executor, command, &arg_strs).await
         }
     };
     crate::runtime_budget::with_deadline(
@@ -127,33 +137,13 @@ pub async fn exec_with_timeout(
     .await
 }
 
-async fn canonical_command_args(
-    host: &HostConfig,
-    command: &str,
-    args: &[&str],
-    remote: Option<&dyn SshExecutor>,
-) -> Result<Vec<String>> {
-    let mut canonical = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
-    for index in command_filesystem_operand_indices(command, args) {
-        let resolved = if let Some(executor) = remote {
-            let output = executor
-                .exec(host, "realpath", &["-e", "--", args[index]])
-                .await?;
-            if output.exit_code != Some(0) {
-                bail!("cannot canonicalize remote operand {}", args[index]);
-            }
-            output.stdout.trim().to_owned()
-        } else {
-            let path = args[index].to_owned();
-            tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
-                .await??
-                .to_string_lossy()
-                .into_owned()
-        };
-        validate_scout_read_path(host, &resolved)?;
-        canonical[index] = resolved;
+fn bound_exec_args(host: &HostConfig, command: &str, args: &[&str]) -> Result<(String, String)> {
+    let mut specs = Vec::new();
+    for index in command_filesystem_operand_indices(command, args)? {
+        let (root, relative) = crate::secure_path::root_and_relative(host, args[index])?;
+        specs.push(json!({"index": index, "root": root, "relative": relative}));
     }
-    Ok(canonical)
+    Ok((serde_json::to_string(args)?, serde_json::to_string(&specs)?))
 }
 
 async fn exec_local(
@@ -162,8 +152,19 @@ async fn exec_local(
     args: &[&str],
     path: Option<&str>,
 ) -> Result<Value> {
-    let output =
-        crate::runtime_budget::run_local_command(command, args, path.map(Path::new)).await?;
+    let (argv, specs) = bound_exec_args(host, command, args)?;
+    let cwd = if let Some(path) = path {
+        let (root, relative) = crate::secure_path::root_and_relative(host, path)?;
+        serde_json::to_string(&json!({"root": root, "relative": relative}))?
+    } else {
+        "null".into()
+    };
+    let output = crate::runtime_budget::run_local_command(
+        "python3",
+        &["-c", BOUND_EXEC_SCRIPT, command, &argv, &specs, &cwd],
+        None,
+    )
+    .await?;
     Ok(json!({
         "host": host.name,
         "command": command,
@@ -181,7 +182,14 @@ async fn exec_remote(
     command: &str,
     args: &[&str],
 ) -> Result<Value> {
-    let out = executor.exec(host, command, args).await?;
+    let (argv, specs) = bound_exec_args(host, command, args)?;
+    let out = executor
+        .exec(
+            host,
+            "python3",
+            &["-c", BOUND_EXEC_SCRIPT, command, &argv, &specs, "null"],
+        )
+        .await?;
     Ok(json!({
         "host": host.name,
         "command": command,
@@ -332,19 +340,12 @@ fn target_paths_by_host(targets: &[EmitTarget]) -> Result<HashMap<String, Option
 }
 
 async fn exec_local_fanout(
-    _host: &HostConfig,
+    host: &HostConfig,
     command: &str,
     args: &[&str],
     path: Option<&str>,
 ) -> Result<Value> {
-    let output =
-        crate::runtime_budget::run_local_command(command, args, path.map(Path::new)).await?;
-    Ok(json!({
-        "path": path,
-        "exit_code": output.exit_code,
-        "stdout": output.stdout,
-        "stderr": output.stderr,
-    }))
+    exec_local(host, command, args, path).await
 }
 
 async fn exec_remote_fanout(
@@ -353,13 +354,7 @@ async fn exec_remote_fanout(
     command: &str,
     args: &[&str],
 ) -> Result<Value> {
-    let out = executor.exec(host, command, args).await?;
-    Ok(json!({
-        "path": null,
-        "exit_code": out.exit_code,
-        "stdout": out.stdout,
-        "stderr": out.stderr,
-    }))
+    exec_remote(host, executor, command, args).await
 }
 
 // ─── beam ────────────────────────────────────────────────────────────────────

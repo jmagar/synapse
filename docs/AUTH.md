@@ -91,7 +91,7 @@ Choose one of:
 2. Set a bearer token:  SYNAPSE_MCP_TOKEN=$(openssl rand -hex 32)
 3. Enable OAuth:        SYNAPSE_MCP_AUTH_MODE=oauth (+ OAuth credentials)
 4. Local no-auth dev:   SYNAPSE_MCP_HOST=127.0.0.1 SYNAPSE_MCP_NO_AUTH=true
-5. Upstream gateway:    SYNAPSE_NOAUTH=true  (if a proxy handles auth)
+5. Upstream gateway:    SYNAPSE_NOAUTH=true  (only if it enforces auth/authz)
 ```
 
 The guard passes when any of the following is true:
@@ -102,7 +102,7 @@ The guard passes when any of the following is true:
 | Bearer token set | `SYNAPSE_MCP_TOKEN=<token>` | Auth middleware enforces it |
 | OAuth enabled | `SYNAPSE_MCP_AUTH_MODE=oauth` | Auth middleware enforces it |
 | Auth disabled | `SYNAPSE_MCP_HOST=127.0.0.1` + `SYNAPSE_MCP_NO_AUTH=true` | Local dev; see below |
-| Gateway override | `SYNAPSE_NOAUTH=true` | Upstream handles auth; see below |
+| Trusted gateway | `SYNAPSE_NOAUTH=true` | Gateway owns auth/authz and must be the only peer able to reach Synapse |
 
 ---
 
@@ -123,18 +123,14 @@ for local calls.
 
 ---
 
-## Upstream gateway / MCP proxy (no server-level auth)
+## Upstream gateway / MCP proxy
 
-If you deploy behind a gateway that handles authentication for all services (e.g. an MCP proxy that validates tokens before routing to this server), you can disable auth at the server level:
-
-```bash
-SYNAPSE_NOAUTH=true         # acknowledge that an upstream gateway handles auth
-```
-
-`SYNAPSE_NOAUTH=true` selects the explicit `TrustedGatewayUnscoped` policy. It
-removes the local auth middleware and scope checks, so only use it when a trusted
-upstream gateway enforces both authentication and authorization before traffic
-reaches this server.
+An upstream gateway can provide defense in depth while Synapse keeps bearer or
+OAuth enabled. In an isolated deployment where the gateway is the complete
+trust boundary, set `SYNAPSE_NOAUTH=true`; Synapse then uses
+`TrustedGatewayUnscoped` and bypasses local authentication and scope checks.
+Firewall or Docker-network policy must ensure that only the gateway can reach
+the Synapse port. Never publish that port directly in this mode.
 
 ---
 
@@ -153,8 +149,8 @@ The `AuthPolicy` enum in `src/server.rs` controls what the router does:
 | Policy | When | Auth enforced? | Scope checks? |
 |---|---|---|---|
 | `LoopbackDev` | Loopback bind, or stdio mode. `SYNAPSE_MCP_NO_AUTH=true` also enables this policy for loopback development. | No | No |
-| `TrustedGatewayUnscoped` | Non-loopback no-auth deployment with `SYNAPSE_NOAUTH=true` | No | No |
+| `TrustedGatewayUnscoped` | Non-loopback with `SYNAPSE_NOAUTH=true`; isolated upstream gateway is the trust boundary | Enforced upstream | Enforced upstream |
 | `Mounted { auth_state: None }` | Bearer-only mode | Yes (token) | Yes |
 | `Mounted { auth_state: Some(_) }` | OAuth mode (+ optional token) | Yes (OAuth / token) | Yes |
 
-Public endpoints (`/health`, `/status`) are never gated by auth, regardless of policy. `/status` returns only local redacted runtime metadata.
+Public endpoints (`/health`, `/ready`, `/status`) are never gated by auth, regardless of policy. `/status` returns only local redacted runtime metadata.

@@ -59,6 +59,13 @@ async fn concurrency_limit_sheds_overload_without_queueing() {
         overloaded.status(),
         axum::http::StatusCode::TOO_MANY_REQUESTS
     );
+    assert_eq!(
+        overloaded
+            .headers()
+            .get(axum::http::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok()),
+        Some("1")
+    );
 
     release.notify_one();
     assert!(first.await.unwrap().is_ok());

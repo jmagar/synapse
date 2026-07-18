@@ -6,7 +6,7 @@
 #           service's actual binary name, URL, and version.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jmagar/synapse2/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jmagar/synapse-rmcp/main/install.sh | bash
 #   # or locally:
 #   bash install.sh
 #
@@ -16,7 +16,7 @@
 #   3. Installs it to ~/.local/bin (no root required)
 #   4. Verifies the installation with --version
 #
-# Requirements: curl, tar (Linux) or unzip (macOS), sha256sum or shasum
+# Requirements: Linux x86_64, curl, tar, sha256sum
 # =============================================================================
 
 set -euo pipefail
@@ -56,11 +56,15 @@ ok()    { printf "${C_GREEN}[OK]${C_RESET}    %s\n" "$*"; }
 # ── Detect OS and architecture ────────────────────────────────────────────────
 
 detect_platform() {
-  local os arch
+  local arch
 
   case "$(uname -s)" in
-    Linux)  os="linux" ;;
-    Darwin) os="macos" ;;
+    Linux) ;;
+    Darwin)
+      error "macOS release binaries are not published."
+      error "Build from source: cargo install --git https://github.com/${REPO}"
+      exit 1
+      ;;
     *)
       error "Unsupported OS: $(uname -s)"
       error "Build from source: cargo install --git https://github.com/${REPO}"
@@ -80,9 +84,6 @@ detect_platform() {
 
   PLATFORM="${arch}"
   ARCHIVE_EXT="tar.gz"
-  if [[ "${os}" == "macos" ]]; then
-    ARCHIVE_EXT="tar.gz"
-  fi
 }
 
 # ── Resolve version ───────────────────────────────────────────────────────────
@@ -156,8 +157,21 @@ download_and_install() {
   fi
 
   mkdir -p "${INSTALL_DIR}"
-  install -m 755 "${binary}" "${INSTALL_DIR}/${BINARY_NAME}"
+  local destination previous staged previous_staged
+  destination="${INSTALL_DIR}/${BINARY_NAME}"
+  previous="${destination}.previous"
+  staged="$(mktemp "${INSTALL_DIR}/.${BINARY_NAME}.new.XXXXXX")"
+  install -m 755 "${binary}" "${staged}"
+  if [[ -f "${destination}" ]]; then
+    previous_staged="$(mktemp "${INSTALL_DIR}/.${BINARY_NAME}.previous.XXXXXX")"
+    cp -p "${destination}" "${previous_staged}"
+    mv -f "${previous_staged}" "${previous}"
+  fi
+  mv -f "${staged}" "${destination}"
   ok "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
+  if [[ -f "${previous}" ]]; then
+    ok "Previous binary preserved at ${previous}"
+  fi
 }
 
 # ── Verify installation ───────────────────────────────────────────────────────

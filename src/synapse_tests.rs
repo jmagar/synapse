@@ -121,6 +121,27 @@ fn command_policy_applies_read_roots_to_filesystem_operands() {
 }
 
 #[test]
+fn command_policy_rejects_relative_and_option_carried_paths() {
+    let host = HostConfig::local();
+    assert!(validate_command_args(&host, "head", &["../../etc/passwd"]).is_err());
+    assert!(
+        validate_command_args(
+            &host,
+            "diff",
+            &["--from-file=/etc/passwd", "/tmp/readable.txt"],
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn command_policy_rejects_untyped_custom_commands() {
+    let mut host = HostConfig::local();
+    host.exec_allowlist.push("find".into());
+    assert!(validate_command_args(&host, "find", &["/tmp", "-exec", "sh"]).is_err());
+}
+
+#[test]
 fn connection_identity_changes_when_topology_or_credentials_change() {
     let base = HostConfig {
         protocol: HostProtocol::Ssh,

@@ -14,6 +14,7 @@ const REQUIRED_PATTERN_FILES: &[&str] = &[
     "src/synapse.rs",
     "src/app.rs",
     "src/actions.rs",
+    "src/actions/operations.rs",
     "src/mcp.rs",
     "src/mcp/tools.rs",
     "src/mcp/schemas.rs",
@@ -311,6 +312,7 @@ pub(super) fn tooling(reporter: &mut PatternReporter) {
     for script in [
         "scripts/check-schema-docs.py",
         "scripts/check-openapi.py",
+        "scripts/check-identity-contract.py",
         "scripts/check-scaffold-intent-contract.py",
         "scripts/validate-plugin-layout.sh",
         "scripts/test-template-features.sh",

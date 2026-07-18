@@ -156,7 +156,7 @@ drop_exec() {
 # Passthrough: if the first argument is not a known subcommand (e.g. docker run ... bash),
 # exec it directly without prepending the binary.
 case "${1:-}" in
-  serve|mcp|greet|echo|status|watch|doctor|setup|help|--help|-h|--version|"")
+  serve|mcp|flux|scout|greet|echo|status|watch|doctor|setup|help|--help|-h|--version|"")
     drop_exec "${BINARY}" "$@"
     ;;
   *)

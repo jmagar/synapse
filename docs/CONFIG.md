@@ -9,7 +9,6 @@
 | `SYNAPSE_MCP_SERVER_NAME` | `synapse2` | MCP server name advertised to clients |
 | `SYNAPSE_MCP_TOKEN` | unset | Static bearer token for bearer mode |
 | `SYNAPSE_MCP_NO_AUTH` | false | Disable auth on loopback only |
-| `SYNAPSE_NOAUTH` | false | Explicit trusted gateway mode |
 | `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | false | Skip destructive-operation confirmation prompts |
 | `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Maximum active API/MCP requests; `0` disables the cap |
 | `SYNAPSE_MCP_ALLOWED_HOSTS` | unset | Extra Host header values |
@@ -44,6 +43,5 @@ Per-host `exec_allowlist` entries extend the built-in safe read command list.
 | State | Condition | Behavior |
 |---|---|---|
 | `LoopbackDev` | loopback bind or loopback no-auth | no auth, no scopes |
-| `TrustedGatewayUnscoped` | `SYNAPSE_NOAUTH=true` behind a trusted gateway | no local auth or scopes |
 | `Mounted` bearer | non-loopback with `SYNAPSE_MCP_TOKEN` | bearer auth and scope checks |
 | `Mounted` OAuth | `SYNAPSE_MCP_AUTH_MODE=oauth` | OAuth/JWT auth and scope checks |

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::actions::{ValidationError, require_container_id};
+use crate::actions::{ValidationError, require_container_id, require_field};
 use crate::app::SynapseService;
 
 use super::ContainerArgs;
@@ -64,7 +64,7 @@ pub(crate) async fn dispatch_flux_container(
         }
         sa @ ("start" | "stop" | "restart" | "pause" | "resume") => {
             flux.container_lifecycle(
-                host,
+                Some(require_field(&args.host, "host")?),
                 require_container_id(&args.container_id)?,
                 sa,
                 confirmer,
@@ -72,15 +72,18 @@ pub(crate) async fn dispatch_flux_container(
             .await
         }
         "pull" => {
-            flux.container_pull(host, require_container_id(&args.container_id)?)
-                .await
+            flux.container_pull(
+                Some(require_field(&args.host, "host")?),
+                require_container_id(&args.container_id)?,
+            )
+            .await
         }
         "recreate" => {
             let params = RecreateParams {
                 pull: args.pull.unwrap_or(true),
             };
             flux.container_recreate(
-                host,
+                Some(require_field(&args.host, "host")?),
                 require_container_id(&args.container_id)?,
                 params,
                 confirmer,
@@ -101,7 +104,8 @@ pub(crate) async fn dispatch_flux_container(
                 workdir: args.exec_workdir.clone(),
                 timeout_ms: args.exec_timeout_ms.unwrap_or(EXEC_TIMEOUT_DEFAULT_MS),
             };
-            flux.container_exec(host, params, confirmer).await
+            flux.container_exec(Some(require_field(&args.host, "host")?), params, confirmer)
+                .await
         }
         other => Err(ValidationError::UnknownAction {
             action: format!("container:{other}"),

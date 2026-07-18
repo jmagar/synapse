@@ -107,6 +107,9 @@ futures-util = "0.3"
 # Static asset embedding (web UI)
 include_dir = { version = "0.7", optional = true }
 
+# Descriptor-relative filesystem access for Scout read-root confinement.
+rustix = { version = "1", features = ["fs"] }
+
 [features]
 default = ["web"]
 web = ["include_dir"]

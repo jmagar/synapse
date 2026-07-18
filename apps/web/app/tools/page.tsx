@@ -1,11 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ParamInput } from "@/components/tools/param-input";
 import { ResponsePanel } from "@/components/tools/response-panel";
 import { SubmitButton } from "@/components/tools/submit-button";
 import { Button } from "@/components/ui/button";
-import { callAction, clearBearerToken, getBearerToken, setBearerToken } from "@/lib/api";
+import {
+  callAction,
+  clearBearerToken,
+  getBearerToken,
+  getCapabilities,
+  setBearerToken,
+} from "@/lib/api";
+import {
+  type CapabilityState,
+  capabilityStateFor,
+  RequestCoordinator,
+  scopeAllowed,
+} from "@/lib/request-state";
 import {
   type ActionParam,
   DEFAULT_REST_ACTION,
@@ -21,9 +33,29 @@ export default function ToolsPage() {
   const [loading, setLoading] = useState(false);
   const [isError, setIsError] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
-  const [hasCredential, setHasCredential] = useState(false);
+  const [capability, setCapability] = useState<CapabilityState>("checking");
+  const [destructiveAllowed, setDestructiveAllowed] = useState(false);
+  const requestsRef = useRef(new RequestCoordinator());
+  const capabilityControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => setHasCredential(Boolean(getBearerToken())), []);
+  const verifyCredential = useCallback(async (hasToken: boolean) => {
+    capabilityControllerRef.current?.abort();
+    const controller = new AbortController();
+    capabilityControllerRef.current = controller;
+    setCapability("checking");
+    const result = await getCapabilities(controller.signal);
+    if (controller.signal.aborted) return;
+    setCapability(capabilityStateFor(result.data, result.status, hasToken, result.error));
+    setDestructiveAllowed(Boolean(result.data?.destructive_allowed));
+  }, []);
+
+  useEffect(() => {
+    void verifyCredential(Boolean(getBearerToken()));
+    return () => {
+      capabilityControllerRef.current?.abort();
+      requestsRef.current.cancel();
+    };
+  }, [verifyCredential]);
 
   const action = REST_ACTIONS.find((a) => a.id === selectedAction) ?? DEFAULT_REST_ACTION;
   const requestPreview = {
@@ -32,6 +64,8 @@ export default function ToolsPage() {
   };
 
   const handleSelect = (id: RestActionId) => {
+    requestsRef.current.cancel();
+    setLoading(false);
     setSelectedAction(id);
     setParamValues({});
     setResponse(null);
@@ -40,14 +74,17 @@ export default function ToolsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const requestAction = selectedAction;
+    const lease = requestsRef.current.begin();
+    if (!lease) return;
     setLoading(true);
     setResponse(null);
     setIsError(false);
 
     const params = buildParams(action.params, paramValues);
 
-    const res = await callAction(selectedAction, params);
-    setLoading(false);
+    const res = await callAction(requestAction, params, lease.signal);
+    if (!requestsRef.current.isCurrent(lease)) return;
 
     if (res.error) {
       const authHint =
@@ -63,17 +100,21 @@ export default function ToolsPage() {
     } else {
       setResponse(JSON.stringify(res.data, null, 2));
     }
+    requestsRef.current.finish(lease);
+    setLoading(false);
   };
 
   const saveCredential = () => {
     setBearerToken(tokenDraft);
-    setHasCredential(Boolean(tokenDraft.trim()));
+    void verifyCredential(Boolean(tokenDraft.trim()));
     setTokenDraft("");
   };
 
   const removeCredential = () => {
+    capabilityControllerRef.current?.abort();
     clearBearerToken();
-    setHasCredential(false);
+    setCapability("anonymous");
+    setDestructiveAllowed(false);
     setTokenDraft("");
   };
 
@@ -135,6 +176,7 @@ export default function ToolsPage() {
                 type="button"
                 key={a.id}
                 onClick={() => handleSelect(a.id)}
+                disabled={loading}
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start border-l-2 font-[var(--aurora-font-mono)]"
@@ -166,9 +208,7 @@ export default function ToolsPage() {
           >
             <p className="text-sm font-semibold">Browser authentication</p>
             <p className="mt-1 text-xs" style={{ color: "var(--aurora-text-muted)" }}>
-              {hasCredential
-                ? "A bearer credential is stored for this browser tab. Static bearer credentials are read-only; OAuth or gateway authorization is required for writes."
-                : "Protected actions are disabled until you provide a bearer credential. The credential is kept only in session storage."}
+              {credentialMessage(capability)}
             </p>
             <div className="mt-3 flex gap-2">
               <input
@@ -183,7 +223,7 @@ export default function ToolsPage() {
               <Button type="button" onClick={saveCredential} disabled={!tokenDraft.trim()}>
                 Save
               </Button>
-              {hasCredential && (
+              {getBearerToken() && (
                 <Button type="button" variant="ghost" onClick={removeCredential}>
                   Clear
                 </Button>
@@ -246,6 +286,7 @@ export default function ToolsPage() {
                       id={param.name}
                       type={param.type}
                       placeholder={param.placeholder}
+                      options={param.options}
                       value={paramValues[param.name] ?? ""}
                       onChange={(value) =>
                         setParamValues((prev) => ({ ...prev, [param.name]: value }))
@@ -269,8 +310,18 @@ export default function ToolsPage() {
 
             <SubmitButton
               loading={loading}
-              disabled={action.scope !== "public" && !hasCredential}
+              disabled={
+                capability === "checking" ||
+                !scopeAllowed(capability, action.scope) ||
+                (Boolean(action.destructive) && !destructiveAllowed)
+              }
             />
+            {action.destructive && !destructiveAllowed && (
+              <p className="mt-2 text-xs" style={{ color: "var(--aurora-warn)" }}>
+                This REST action requires the server destructive-action override or MCP
+                confirmation.
+              </p>
+            )}
           </form>
 
           {response !== null && <ResponsePanel response={response} isError={isError} />}
@@ -312,6 +363,23 @@ export default function ToolsPage() {
       </div>
     </div>
   );
+}
+
+function credentialMessage(state: CapabilityState): string {
+  switch (state) {
+    case "checking":
+      return "Checking the server capabilities for this browser session…";
+    case "read":
+      return "The current credential permits read actions. Write actions remain disabled.";
+    case "write":
+      return "The current session permits read and write actions.";
+    case "expired":
+      return "The stored credential is expired or invalid. Save a valid credential to continue.";
+    case "unavailable":
+      return "Server capabilities could not be verified. Protected actions remain disabled until the server is reachable.";
+    default:
+      return "Protected actions are disabled. Credentials are kept only in memory and cleared on reload.";
+  }
 }
 
 function buildParams(

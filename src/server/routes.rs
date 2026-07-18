@@ -3,7 +3,9 @@
 //! Endpoints:
 //!   `POST /mcp`         — MCP Streamable HTTP transport (tools, resources, prompts)
 //!   `GET  /health`      — Health check (unauthenticated)
+//!   `GET  /ready`       — Bounded topology readiness (unauthenticated)
 //!   `GET  /status`      — Runtime status (unauthenticated, redacts secrets)
+//!   `GET  /capabilities` — Credential scopes (authenticated with API routes)
 //!   `GET  /openapi.json` — OpenAPI schema (auth-gated on non-loopback, see below)
 //!   `POST /v1/synapse2`  — REST API action dispatch (see `crate::api`)
 //!   `/*`                — SPA fallback for embedded web UI (when web feature enabled)
@@ -12,7 +14,7 @@ use std::sync::Arc;
 
 use axum::{
     Router,
-    http::{HeaderValue, Method, StatusCode},
+    http::{HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
 };
@@ -22,10 +24,9 @@ use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 // ── Global concurrency limit (S-H5 / A-M5) ───────────────────────────────────
 //
 // A lightweight tower Layer backed by a `tokio::sync::Semaphore` that caps the
-// number of concurrently in-flight requests on the API+MCP router.  Requests
-// arriving when all permits are taken wait for a permit before being forwarded
-// to the inner service — they are *queued*, not rejected, so clients experience
-// back-pressure rather than errors under normal load spikes.
+// number of concurrently in-flight requests on the API+MCP router. Requests
+// arriving when all permits are taken are rejected with HTTP 429 and a
+// `Retry-After` header, avoiding an unbounded in-process wait queue.
 //
 // We implement the layer inline rather than enabling the tower "limit" feature
 // (which is not currently in the feature set) to avoid a Cargo.toml edit.
@@ -116,6 +117,7 @@ where
             let Ok(_permit) = sem.try_acquire_owned() else {
                 return Ok((
                     StatusCode::TOO_MANY_REQUESTS,
+                    [(header::RETRY_AFTER, "1")],
                     Json(json!({
                         "error": "server overloaded",
                         "retryable": true,
@@ -128,7 +130,7 @@ where
     }
 }
 
-use crate::api::{api_dispatch, health, openapi_json, ready, status};
+use crate::api::{activity, api_dispatch, capabilities, health, openapi_json, ready, status};
 use crate::mcp::{allowed_origins, streamable_http_config, streamable_http_service};
 use crate::server::{AppState, AuthPolicy, build_auth_layer};
 
@@ -154,27 +156,18 @@ pub fn router(state: AppState) -> Router {
         resource_url,
     );
 
-    // Global concurrency limit (S-H5 / A-M5): cap simultaneous in-flight
-    // requests on the API+MCP router to prevent SSH/CPU/FD exhaustion under
-    // request storms.  Controlled by SYNAPSE_MCP_MAX_CONCURRENCY (default 50).
-    // Set to 0 to disable.  /health and /status are NOT covered by this limit
-    // so monitoring probes always get a response.
-    let concurrency_layer = ConcurrencyLimitLayer::new(state.config.max_concurrency);
-
     let api_and_mcp: Router<AppState> = Router::new()
         .nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config))
-        .route("/v1/synapse2", post(api_dispatch));
+        .route("/v1/synapse2", post(api_dispatch))
+        .route("/activity", get(activity))
+        .route("/capabilities", get(capabilities));
 
     let api_and_mcp_resolved: Router<()> = api_and_mcp.with_state(state.clone());
 
-    // Layer order matters: in axum the LAST `.layer(...)` is the OUTERMOST and
-    // runs first. Apply the concurrency cap first (inner) and auth last (outer)
-    // so unauthenticated requests are rejected before consuming a concurrency
-    // permit; the cap then wraps only authenticated work.
     let authenticated = if let Some(layer) = auth_layer {
-        api_and_mcp_resolved.layer(concurrency_layer).layer(layer)
+        api_and_mcp_resolved.layer(layer)
     } else {
-        api_and_mcp_resolved.layer(concurrency_layer)
+        api_and_mcp_resolved
     };
 
     let oauth_router: Option<Router> = if let AuthPolicy::Mounted {
@@ -204,8 +197,7 @@ pub fn router(state: AppState) -> Router {
     // /health, /ready and /status are always public (monitoring probes).
     // /openapi.json exposes the full action schema and is gated behind auth on
     // non-loopback/Mounted policies to prevent unauthenticated schema enumeration
-    // (S-M7 / CWE-200). On LoopbackDev and TrustedGatewayUnscoped it remains
-    // open — auth is enforced at the transport/gateway layer in those modes.
+    // (S-M7 / CWE-200). On LoopbackDev it remains open.
     let always_public: Router<()> = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
@@ -234,8 +226,6 @@ pub fn router(state: AppState) -> Router {
                     openapi_resolved
                 }
             }
-            // LoopbackDev / TrustedGatewayUnscoped: openapi remains public.
-            // The trust boundary is the bind address / upstream gateway.
             AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => openapi_resolved,
         }
     };
@@ -254,7 +244,8 @@ pub fn router(state: AppState) -> Router {
         base.fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"}))) })
     };
 
-    base.layer(RequestBodyLimitLayer::new(MCP_BODY_LIMIT_BYTES))
+    base.layer(ConcurrencyLimitLayer::new(state.config.max_concurrency))
+        .layer(RequestBodyLimitLayer::new(MCP_BODY_LIMIT_BYTES))
         .layer(cors_layer(&state.config))
 }
 

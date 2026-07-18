@@ -5,8 +5,8 @@
 //! # Usage
 //!
 //! ```text
-//! synapse2 flux container list --host local
-//! synapse2 scout nodes
+//! synapse flux container list --host local
+//! synapse scout nodes
 //! synapse2 doctor [--json]
 //! ```
 

@@ -50,7 +50,7 @@ services:
       # Default: bind to loopback only — not exposed on all interfaces.
       # Production deployments should sit behind a reverse proxy (SWAG/nginx/Caddy)
       # which terminates TLS and handles auth. Direct external exposure combined
-      # with SYNAPSE_NOAUTH=true would grant root-equivalent Docker access.
+      # without local bearer/OAuth auth would grant root-equivalent Docker access.
       # To expose on all interfaces (e.g. when a reverse proxy handles auth
       # externally), override: SYNAPSE_MCP_BIND_HOST=0.0.0.0 in your .env and
       # change the mapping to: "${SYNAPSE_MCP_BIND_HOST:-127.0.0.1}:..."

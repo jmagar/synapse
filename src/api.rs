@@ -1,4 +1,4 @@
-//! REST API handlers — `POST /v1/synapse2`, `GET /health`, `GET /status`, `GET /openapi.json`.
+//! REST API handlers — action dispatch, health/status/activity/capabilities, and OpenAPI.
 //!
 //! All handlers are thin: parse the request, call the service, return JSON.
 //! Business logic lives in `app.rs`.
@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-use crate::actions::{SynapseAction, execute_service_action, required_scope_for_parsed_action};
+use crate::actions::{SynapseAction, execute_service_action};
 use crate::server::{AppState, AuthPolicy};
 use crate::token_limit::MAX_RESPONSE_BYTES;
 
@@ -39,27 +39,45 @@ pub async fn api_dispatch(
     auth: Option<Extension<AuthContext>>,
     Json(body): Json<ActionRequest>,
 ) -> impl IntoResponse {
-    let result = match crate::actions::rest::action_from_request(&body.action, &body.params) {
-        Ok(action) => {
-            if let Some(response) =
-                enforce_rest_scope(&state, auth.as_ref().map(|Extension(auth)| auth), &action)
-            {
-                return response;
+    let result =
+        match crate::actions::rest::action_and_spec_from_request(&body.action, &body.params) {
+            Ok((action, spec)) => {
+                if let Some(response) = enforce_rest_scope(
+                    &state,
+                    auth.as_ref().map(|Extension(auth)| auth),
+                    &action,
+                    spec.required_scope,
+                ) {
+                    state
+                        .activity
+                        .record("rest", &body.action, false, Some("forbidden"));
+                    return response;
+                }
+                // REST has no elicitation channel: destructive ops are hard-denied
+                // (DenyConfirm) unless the SYNAPSE_MCP_ALLOW_DESTRUCTIVE override is
+                // set, in which case NoConfirm runs them. Read-only ops are
+                // unaffected (their service methods never call the confirmer).
+                let confirmer: Box<dyn crate::elicitation_gate::Confirmer> =
+                    if state.config.allow_destructive {
+                        Box::new(crate::elicitation_gate::NoConfirm)
+                    } else {
+                        Box::new(crate::elicitation_gate::DenyConfirm)
+                    };
+                execute_service_action(&state.service, &action, confirmer.as_ref()).await
             }
-            // REST has no elicitation channel: destructive ops are hard-denied
-            // (DenyConfirm) unless the SYNAPSE_MCP_ALLOW_DESTRUCTIVE override is
-            // set, in which case NoConfirm runs them. Read-only ops are
-            // unaffected (their service methods never call the confirmer).
-            let confirmer: Box<dyn crate::elicitation_gate::Confirmer> =
-                if state.config.allow_destructive {
-                    Box::new(crate::elicitation_gate::NoConfirm)
-                } else {
-                    Box::new(crate::elicitation_gate::DenyConfirm)
-                };
-            execute_service_action(&state.service, &action, confirmer.as_ref()).await
-        }
-        Err(error) => Err(error),
-    };
+            Err(error) => Err(error),
+        };
+
+    state.activity.record(
+        "rest",
+        &body.action,
+        result.is_ok(),
+        result
+            .as_ref()
+            .err()
+            .map(|error| error.to_string())
+            .as_deref(),
+    );
 
     match result {
         Ok(value) => match cap_rest_response(value) {
@@ -128,11 +146,12 @@ fn enforce_rest_scope(
     state: &AppState,
     auth: Option<&AuthContext>,
     action: &SynapseAction,
+    required_scope: Option<&'static str>,
 ) -> Option<axum::response::Response> {
     if !matches!(&state.auth_policy, AuthPolicy::Mounted { .. }) {
         return None;
     }
-    let required_scope = required_scope_for_parsed_action(action)?;
+    let required_scope = required_scope?;
     let Some(auth) = auth else {
         tracing::warn!(action = %action.name(), "REST action denied: missing auth context");
         return Some(
@@ -174,13 +193,26 @@ pub async fn health() -> impl IntoResponse {
 /// be loaded. It deliberately does not dial every remote host: those checks
 /// would make readiness slow and flap on an unrelated fleet member.
 pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    match tokio::time::timeout(Duration::from_secs(2), state.service.scout().nodes()).await {
-        Ok(Ok(_)) => (StatusCode::OK, Json(json!({"status": "ready"}))).into_response(),
-        Ok(Err(error)) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"status": "not_ready", "error": error.to_string()})),
-        )
-            .into_response(),
+    let service = state.service.clone();
+    let check = tokio::task::spawn_blocking(move || service.scout().nodes_blocking());
+    match tokio::time::timeout(Duration::from_secs(2), check).await {
+        Ok(Ok(Ok(_))) => (StatusCode::OK, Json(json!({"status": "ready"}))).into_response(),
+        Ok(Ok(Err(error))) => {
+            tracing::warn!(error = %error, "readiness topology check failed");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"status": "not_ready", "error": "topology unavailable"})),
+            )
+                .into_response()
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "readiness worker failed");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"status": "not_ready", "error": "topology unavailable"})),
+            )
+                .into_response()
+        }
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"status": "not_ready", "error": "topology check timed out"})),
@@ -199,11 +231,58 @@ pub async fn openapi_json() -> impl IntoResponse {
 
 /// `GET /status` — local runtime status (unauthenticated, redacts secrets).
 pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    Json(json!({
+    Json(status_payload(&state)).into_response()
+}
+
+pub(crate) fn status_payload(state: &AppState) -> Value {
+    json!({
         "status": "ok",
         "server": state.config.server_name,
         "version": env!("CARGO_PKG_VERSION"),
         "transport": "http",
+    })
+}
+
+/// `GET /activity` — bounded REST and MCP action history.
+pub async fn activity(
+    State(state): State<AppState>,
+    auth: Option<Extension<AuthContext>>,
+) -> impl IntoResponse {
+    if matches!(&state.auth_policy, AuthPolicy::Mounted { .. }) {
+        let Some(Extension(auth)) = auth else {
+            return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden"}))).into_response();
+        };
+        if !crate::actions::scopes_satisfy(&auth.scopes, crate::actions::READ_SCOPE) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "forbidden: requires scope: synapse:read"})),
+            )
+                .into_response();
+        }
+    }
+    Json(json!({"events": state.activity.snapshot()})).into_response()
+}
+
+/// `GET /capabilities` — authoritative authorization state for the web client.
+pub async fn capabilities(
+    State(state): State<AppState>,
+    auth: Option<Extension<AuthContext>>,
+) -> impl IntoResponse {
+    let scopes = if matches!(&state.auth_policy, AuthPolicy::Mounted { .. }) {
+        let Some(Extension(auth)) = auth else {
+            return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden"}))).into_response();
+        };
+        auth.scopes
+    } else {
+        vec![
+            crate::actions::READ_SCOPE.to_owned(),
+            crate::actions::WRITE_SCOPE.to_owned(),
+        ]
+    };
+
+    Json(json!({
+        "scopes": scopes,
+        "destructive_allowed": state.config.allow_destructive,
     }))
     .into_response()
 }

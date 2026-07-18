@@ -5,7 +5,7 @@
 //! - Per-entry TTL with default 60s, configurable per cache instance.
 //! - Max entries cap (default 10k) with LRU eviction to bound memory.
 //! - Lazy expiration on `get`, no background sweeper threads.
-//! - Thread-safe via `DashMap` for concurrent access without global locks.
+//! - Thread-safe via a mutex-protected `HashMap`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -64,7 +64,7 @@ struct CacheState<K, V> {
 ///
 /// - **TTL:** Per-entry, configurable per cache instance (default 60s).
 /// - **Max entries:** Capped (default 10k); when exceeded, least-recently-used entries are evicted.
-/// - **Thread safety:** Backed by `DashMap` for lock-free concurrent access.
+/// - **Thread safety:** Serialized through a mutex-protected `HashMap`.
 /// - **Expiration:** Lazily checked on `get`; expired entries are removed.
 pub struct MemoryCache<K, V>
 where
@@ -120,7 +120,7 @@ where
 
     /// Evict least-recently-used entry when capacity is reached.
     ///
-    /// Simple heuristic: remove the entry with the oldest `inserted_at`.
+    /// Remove the entry with the oldest access sequence.
     fn evict_lru(state: &mut CacheState<K, V>) {
         if let Some(key) = state
             .store

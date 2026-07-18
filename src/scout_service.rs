@@ -78,6 +78,10 @@ impl ScoutService {
     // ── nodes ────────────────────────────────────────────────────────────────
 
     pub async fn nodes(&self) -> Result<Value> {
+        self.nodes_blocking()
+    }
+
+    pub(crate) fn nodes_blocking(&self) -> Result<Value> {
         scout::nodes(self.host_repo.as_ref())
     }
 

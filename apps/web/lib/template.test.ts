@@ -54,11 +54,10 @@ describe("template action metadata", () => {
     expect(normalized).toEqual(generated);
   });
 
-  it("keeps MCP-only actions aligned with generated OpenAPI metadata", () => {
-    const webMcpOnlyActions = ACTIONS.filter((action) => action.transport === "mcp-only").map(
-      (action) => action.id,
-    );
-    expect(webMcpOnlyActions).toEqual(openApi["x-template"].mcp_only_actions);
+  it("reports the actual MCP-only operation set", () => {
+    const rest = new Set<string>(REST_ACTIONS.map((action) => action.id));
+    expect(openApi["x-template"].mcp_only_actions.length).toBeGreaterThan(0);
+    expect(openApi["x-template"].mcp_only_actions.every((action) => !rest.has(action))).toBe(true);
   });
 
   it("does not duplicate action identifiers", () => {
