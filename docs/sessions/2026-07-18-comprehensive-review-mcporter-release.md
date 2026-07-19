@@ -5,7 +5,7 @@ branch: main
 head: 4a1e283ab16dd8438a799294bc6aec014fa99cb8
 working directory: /home/jmagar/workspace/synapse
 worktree: /home/jmagar/workspace/synapse
-beads: rmcp-template-krg1, rmcp-template-krg1.1-rmcp-template-krg1.82, rmcp-template-xztq, rmcp-template-67oo, rmcp-template-67oo.1-rmcp-template-67oo.7, rmcp-template-2pkz, rmcp-template-8tmu, rmcp-template-u912, rmcp-template-b977, rmcp-template-j5mo, rmcp-template-b3re, rmcp-template-cbar, rmcp-template-wc71, rmcp-template-ar56
+beads: rmcp-template-krg1, rmcp-template-krg1.1-rmcp-template-krg1.82, rmcp-template-xztq, rmcp-template-67oo, rmcp-template-67oo.1-rmcp-template-67oo.7, rmcp-template-2pkz, rmcp-template-8tmu, rmcp-template-u912, rmcp-template-b977, rmcp-template-j5mo, rmcp-template-b3re, rmcp-template-cbar, rmcp-template-wc71, rmcp-template-ar56, rmcp-template-xhc2
 ---
 
 # Comprehensive review, mcporter remediation, and v0.6.1 release
@@ -203,6 +203,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 | rmcp-template-cbar | Require object schema properties | created, fixed, closed | closed | Enforced JSON Schema shape. |
 | rmcp-template-wc71 | Save comprehensive review and mcporter session log | created, claimed, artifact landed, closed | closed | Artifact-only commit <code>c3bc74c</code> was pushed to main and verified before closure. |
 | rmcp-template-ar56 | Replace stale template crate names in testing docs | created | open | Captures the only precise stale-doc follow-up found during maintenance. |
+| rmcp-template-xhc2 | Triage two moderate Dependabot alerts | created | open | Tracks GitHub alerts #3 (<code>cmov</code>) and #4 (<code>postcss</code>) observed during the artifact push. |
 
 ## Repository Maintenance
 
@@ -215,6 +216,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 - All comprehensive-review, Lavra, merge, and mcporter remediation beads are closed with observed verification.
 - Created, claimed, and closed <code>rmcp-template-wc71</code> after artifact-only commit <code>c3bc74c</code> landed on <code>main</code>; <code>bd dolt push</code> completed.
 - Created open follow-up <code>rmcp-template-ar56</code> because <code>docs/TESTING.md:106</code> still says <code>example_mcp</code> and <code>tests/README.md:45,119</code> still says <code>rmcp_template</code>, while <code>Cargo.toml:18</code> names the package <code>synapse2</code>.
+- Created open follow-up <code>rmcp-template-xhc2</code> after GitHub's push response and Dependabot API confirmed two moderate alerts: #3 for <code>cmov</code> in <code>Cargo.lock</code> and #4 for <code>postcss</code> in <code>apps/web/pnpm-lock.yaml</code>.
 
 ### Worktrees and branches
 
@@ -326,14 +328,18 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 - [PR #70: rmcp 2.2 mcporter responses](https://github.com/jmagar/synapse-rmcp/pull/70)
 - [PR #71: v0.6.1](https://github.com/jmagar/synapse-rmcp/pull/71)
 - [Release v0.6.1](https://github.com/jmagar/synapse-rmcp/releases/tag/v0.6.1)
+- [Dependabot alert #3: cmov](https://github.com/jmagar/synapse-rmcp/security/dependabot/3)
+- [Dependabot alert #4: postcss](https://github.com/jmagar/synapse-rmcp/security/dependabot/4)
 
 ## Open Questions
 
 - Follow-up bead <code>rmcp-template-ar56</code> remains open to replace three stale template/example crate-name references in testing documentation.
+- Follow-up bead <code>rmcp-template-xhc2</code> remains open to resolve or evidence-dismiss the two moderate Dependabot alerts reported by GitHub.
 
 ## Next Steps
 
 - **Unfinished from this session:** none in the reviewed runtime, merged PR set, Lavra findings, mcporter suite, release, or repository cleanup.
 - **Follow-on not started:** claim <code>rmcp-template-ar56</code>, replace the stale crate names in <code>docs/TESTING.md</code> and <code>tests/README.md</code>, run documentation/template checks, and close the bead.
+- **Follow-on not started:** claim <code>rmcp-template-xhc2</code>, verify the resolved <code>cmov</code>/<code>postcss</code> versions and reachability, then upgrade or dismiss the alerts with evidence.
 - **Blocked work:** none.
-- **Immediate repository command:** <code>bd show rmcp-template-ar56</code>.
+- **Immediate repository command:** <code>bd show rmcp-template-ar56 rmcp-template-xhc2</code>.
