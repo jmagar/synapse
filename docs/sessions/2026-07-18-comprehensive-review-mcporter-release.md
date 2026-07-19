@@ -201,7 +201,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 | rmcp-template-j5mo | Remove unused jq prerequisite | created, fixed, closed | closed | Kept prerequisites accurate. |
 | rmcp-template-b3re | Synchronize mcporter contract documentation | created, fixed, closed | closed | Aligned docs and harness. |
 | rmcp-template-cbar | Require object schema properties | created, fixed, closed | closed | Enforced JSON Schema shape. |
-| rmcp-template-wc71 | Save comprehensive review and mcporter session log | created, claimed | in progress at artifact generation | Tracks this save-to-md workflow; closure follows successful landing verification. |
+| rmcp-template-wc71 | Save comprehensive review and mcporter session log | created, claimed, artifact landed, closed | closed | Artifact-only commit <code>c3bc74c</code> was pushed to main and verified before closure. |
 | rmcp-template-ar56 | Replace stale template crate names in testing docs | created | open | Captures the only precise stale-doc follow-up found during maintenance. |
 
 ## Repository Maintenance
@@ -213,7 +213,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 ### Beads
 
 - All comprehensive-review, Lavra, merge, and mcporter remediation beads are closed with observed verification.
-- Created and claimed <code>rmcp-template-wc71</code> for this artifact.
+- Created, claimed, and closed <code>rmcp-template-wc71</code> after artifact-only commit <code>c3bc74c</code> landed on <code>main</code>; <code>bd dolt push</code> completed.
 - Created open follow-up <code>rmcp-template-ar56</code> because <code>docs/TESTING.md:106</code> still says <code>example_mcp</code> and <code>tests/README.md:45,119</code> still says <code>rmcp_template</code>, while <code>Cargo.toml:18</code> names the package <code>synapse2</code>.
 
 ### Worktrees and branches
@@ -266,6 +266,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 - Integration CI exposed plugin binary discovery under coverage and disposable SSH account-state failures. Compile-time binary discovery and fixture-state repair fixed them; authoritative checks passed afterward.
 - Intermediate dependency-head runs included a failed MSRV and cancelled superseded CI run; the final v0.6.1 head has green CI and MSRV.
 - Two <code>gh run watch</code> calls yielded while release jobs were still running; bounded polling continued until both Release and Docker Publish completed successfully.
+- An artifact completeness loop used <code>path</code> as a zsh loop variable, which replaced the shell's special <code>PATH</code> array and made <code>rg</code> unavailable. Rerunning with <code>file_path</code> and <code>grep -Fq</code> verified that all 210 changed paths are present.
 
 ## Behavior Changes (Before/After)
 
@@ -293,6 +294,7 @@ The session used Beads as the issue source of truth. The comprehensive-review ro
 | GitHub Release run 29647747590 | v0.6.1 assets and npm package publish. | completed/success. | pass |
 | <code>gh pr list --state open --json number,title,url</code> | No merge work remains. | <code>[]</code>. | pass |
 | <code>git status --short --branch</code> | Main is clean and synchronized. | <code>## main...origin/main</code>. | pass |
+| <code>git diff-tree --no-commit-id --name-only -r c3bc74c</code> | The initial session commit contains only the generated artifact. | Only <code>docs/sessions/2026-07-18-comprehensive-review-mcporter-release.md</code>. | pass |
 
 ## Risks and Rollback
 
