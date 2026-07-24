@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_INCREMENTAL: "0"
+  SOLDR_CACHE_DIR: ${{ github.workspace }}/../.soldr-cache
+
 jobs:
   release-meta:
     runs-on: [self-hosted, unraid]
@@ -70,8 +74,8 @@ jobs:
         with:
           ref: ${{ needs.release-meta.outputs.tag_name }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.90.0
+      - name: Install Rust + soldr
+        uses: ./.github/actions/setup-rust-soldr
         with:
           toolchain: 1.90.0
           targets: ${{ matrix.target }}
@@ -86,10 +90,6 @@ jobs:
             pnpm install --frozen-lockfile
             pnpm build
           fi
-
-      - uses: Swatinem/rust-cache@401aff9a7a08acb9d27b64936a90db81024cff97 # v2.8.2
-        with:
-          key: ${{ matrix.target }}
 
       - name: Build (linux)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
